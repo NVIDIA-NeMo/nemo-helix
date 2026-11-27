@@ -193,6 +193,24 @@ const resolveTaskRef = (workspace: string, ref: string): string | undefined => {
   return revision ? `${ws}/${name}#${contentHash(revision)}` : undefined;
 };
 
+/** A write's stored content, members pinned; undefined when a member doesn't resolve. Refs the
+ *  taskset already stores are kept as-is, so an edit isn't blocked by a member task since removed. */
+const resolveTasksetInput = (
+  workspace: string,
+  { tasks = [], description, files_ref, metadata }: TasksetInput,
+  stored: string[] = []
+): Pick<Taskset, 'tasks' | 'description' | 'files_ref' | 'metadata'> | undefined => {
+  const resolved = tasks.map((ref) =>
+    stored.includes(ref) ? ref : resolveTaskRef(workspace, ref)
+  );
+  return resolved.every(Boolean)
+    ? { tasks: resolved as string[], description, files_ref, metadata }
+    : undefined;
+};
+
+const unknownTaskRef = () =>
+  HttpResponse.json({ detail: 'Unknown task reference' }, { status: 422 });
+
 export const evaluatorHandlers = [
   // nemo-evals agent-evaluate jobs — Studio's agent-evaluation feature runs
   // here. Default to an empty list / 404 so the list + detail routes render
@@ -245,23 +263,17 @@ export const evaluatorHandlers = [
   http.post(TASKSET_URL, async ({ request, params }) => {
     const workspace = String(params.workspace);
     const name = String(params.name);
-    const { tasks = [], description, files_ref, metadata } = (await request.json()) as TasksetInput;
     if (findTaskset(workspace, name)) {
       return HttpResponse.json({ detail: `Taskset ${name} already exists` }, { status: 409 });
     }
-    const resolved = tasks.map((ref) => resolveTaskRef(workspace, ref));
-    if (resolved.some((ref) => !ref)) {
-      return HttpResponse.json({ detail: 'Unknown task reference' }, { status: 422 });
-    }
+    const content = resolveTasksetInput(workspace, (await request.json()) as TasksetInput);
+    if (!content) return unknownTaskRef();
     const now = new Date().toISOString();
     const taskset: Taskset = {
       id: `taskset-${name}`,
       name,
       workspace,
-      description,
-      files_ref,
-      metadata,
-      tasks: resolved as string[],
+      ...content,
       revision: 1,
       tags: { latest: 1 },
       created_at: now,
@@ -269,6 +281,29 @@ export const evaluatorHandlers = [
     };
     mockTasksets.push(taskset);
     return HttpResponse.json(taskset, { status: 201 });
+  }),
+  http.put(TASKSET_URL, async ({ request, params }) => {
+    const taskset = findTaskset(params.workspace, params.name);
+    if (!taskset) return notFound('Taskset');
+    const content = resolveTasksetInput(
+      taskset.workspace,
+      (await request.json()) as TasksetInput,
+      taskset.tasks
+    );
+    if (!content) return unknownTaskRef();
+    const revision = taskset.revision + 1;
+    Object.assign(taskset, content, {
+      revision,
+      tags: { ...taskset.tags, latest: revision },
+      updated_at: new Date().toISOString(),
+    });
+    return HttpResponse.json(taskset);
+  }),
+  http.delete(TASKSET_URL, ({ params }) => {
+    const taskset = findTaskset(params.workspace, params.name);
+    if (!taskset) return notFound('Taskset');
+    mockTasksets.splice(mockTasksets.indexOf(taskset), 1);
+    return new HttpResponse(null, { status: 204 });
   }),
   http.get(TASKSET_URL, ({ params }) => {
     const taskset = findTaskset(params.workspace, params.name);

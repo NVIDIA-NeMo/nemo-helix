@@ -13,9 +13,15 @@ import {
   evalsListTasks,
   getEvalsListTasksQueryKey,
 } from '@nemo/sdk/generated/evals/evals-plugin-tasks-routes';
-import { useEvalsCreateTaskset } from '@nemo/sdk/generated/evals/evals-plugin-tasksets-routes';
+import {
+  useEvalsCreateTaskset,
+  useEvalsReplaceTaskset,
+} from '@nemo/sdk/generated/evals/evals-plugin-tasksets-routes';
+import type { Taskset, TasksetInput } from '@nemo/sdk/generated/evals/schema';
 import { Button, Stack } from '@nvidia/foundations-react-core';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
+import { parseTaskRef } from '@studio/routes/evaluation/taskHelpers';
+import { invalidateTasksets } from '@studio/routes/evaluation/tasksets/helpers';
 import { getTasksetDetailRoute } from '@studio/routes/utils';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { FC } from 'react';
@@ -23,31 +29,38 @@ import { useForm } from 'react-hook-form';
 import { useNavigate } from 'react-router';
 import { z } from 'zod';
 
-const schema = z.object({
-  name: z
-    .string()
-    .refine((value) => sanitizeEntityName(value) !== undefined, {
-      message: 'Name must start with a letter and be at least 2 characters.',
-    })
-    .transform((value) => toValidEntityName(value, value)),
-  description: z.string(),
-  tasks: z.array(z.string()).min(1, 'Select at least one task.'),
-});
+// A files-backed taskset may have no members, so only enforce one when there's no `files_ref`.
+const getSchema = (minTasks: number) =>
+  z.object({
+    name: z
+      .string()
+      .refine((value) => sanitizeEntityName(value) !== undefined, {
+        message: 'Name must start with a letter and be at least 2 characters.',
+      })
+      .transform((value) => toValidEntityName(value, value)),
+    description: z.string(),
+    tasks: z.array(z.string()).min(minTasks, 'Select at least one task.'),
+  });
 
-type FormInput = z.input<typeof schema>;
-type FormOutput = z.output<typeof schema>;
-
-const DEFAULT_VALUES: FormInput = { name: '', description: '', tasks: [] };
+type FormInput = z.input<ReturnType<typeof getSchema>>;
+type FormOutput = z.output<ReturnType<typeof getSchema>>;
 
 interface Props {
   open: boolean;
   onClose: () => void;
+  /** When set, the modal edits this taskset (publishing a new revision) instead of creating one. */
+  taskset?: Taskset;
 }
 
-export const TasksetFormModal: FC<Props> = ({ open, onClose }) => {
+export const TasksetFormModal: FC<Props> = ({ open, onClose, taskset }) => {
   const workspace = useWorkspaceFromPath();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const defaultValues: FormInput = {
+    name: taskset?.name ?? '',
+    description: taskset?.description ?? '',
+    tasks: taskset?.tasks ?? [],
+  };
 
   // Drained so tasks past the first page stay selectable; keyed under the list key so task
   // writes invalidate it.
@@ -67,52 +80,71 @@ export const TasksetFormModal: FC<Props> = ({ open, onClose }) => {
     enabled: open,
   });
 
+  // Current members keep their stored (digest-pinned) refs so an edit doesn't silently move them
+  // to latest; tasks added here go in bare and the server pins them to their latest revision.
+  const members = taskset?.tasks ?? [];
+  const memberKeys = new Set(
+    members.map((ref) => {
+      const { workspace: ws, name } = parseTaskRef(ref, workspace);
+      return `${ws}/${name}`;
+    })
+  );
+  const items = [
+    ...members.map((ref) => ({ value: ref, children: parseTaskRef(ref, workspace).name })),
+    ...(taskNames ?? []).filter((name) => !memberKeys.has(`${workspace}/${name}`)),
+  ];
+
   const {
     control,
     handleSubmit,
     reset,
     watch,
-    formState: { errors, isSubmitting },
+    formState: { errors, isDirty, isSubmitting },
   } = useForm<FormInput, unknown, FormOutput>({
-    resolver: zodResolver(schema),
-    defaultValues: DEFAULT_VALUES,
+    resolver: zodResolver(getSchema(taskset?.files_ref ? 0 : 1)),
+    defaultValues,
     mode: 'onTouched',
   });
 
   const preview = toValidEntityName(watch('name'), '');
-  const { mutateAsync: createTaskset, error, reset: resetMutation } = useEvalsCreateTaskset();
+  const create = useEvalsCreateTaskset();
+  const replace = useEvalsReplaceTaskset();
+  const { error } = taskset ? replace : create;
 
   const handleClose = () => {
-    reset(DEFAULT_VALUES);
-    resetMutation();
+    reset(defaultValues);
+    create.reset();
+    replace.reset();
     onClose();
   };
 
   const onSubmit = async ({ name, description, tasks }: FormOutput) => {
+    // PUT replaces the whole record, so carry over the fields this form doesn't edit.
+    const data: TasksetInput = {
+      tasks,
+      files_ref: taskset?.files_ref,
+      metadata: taskset?.metadata,
+      ...(description.trim() && { description: description.trim() }),
+    };
     try {
-      await createTaskset({
-        workspace,
-        name,
-        data: { tasks, ...(description.trim() && { description: description.trim() }) },
-      });
+      await (taskset ? replace : create).mutateAsync({ workspace, name, data });
     } catch {
       // Surfaced through `errorText`; the modal stays open.
       return;
     }
-    await queryClient.invalidateQueries({
-      queryKey: [`/apis/evals/v2/workspaces/${workspace}/tasksets`],
-    });
+    await invalidateTasksets(queryClient, workspace);
     handleClose();
-    navigate(getTasksetDetailRoute(workspace, name));
+    if (!taskset) navigate(getTasksetDetailRoute(workspace, name));
   };
 
   return (
     <FormModal
       open={open}
-      title="Create Taskset"
-      submitButtonText="Create"
+      title={taskset ? `Edit Taskset: ${taskset.name}` : 'Create Taskset'}
+      submitButtonText={taskset ? 'Save' : 'Create'}
       disabled={isSubmitting}
       loading={isSubmitting}
+      submitDisabled={!!taskset && !isDirty}
       errorText={error ? getErrorMessage(error) : null}
       onSubmit={handleSubmit(onSubmit)}
       onClose={handleClose}
@@ -120,11 +152,11 @@ export const TasksetFormModal: FC<Props> = ({ open, onClose }) => {
       <Stack gap="density-lg">
         <ControlledTextInput
           label="Name"
-          disabled={isSubmitting}
+          disabled={isSubmitting || !!taskset}
           useControllerProps={{ name: 'name', control }}
           formFieldProps={{
             slotHelp:
-              !errors.name && preview ? (
+              !taskset && !errors.name && preview ? (
                 <>
                   Your taskset will be created as <span className="text-primary">{preview}</span>
                 </>
@@ -145,12 +177,14 @@ export const TasksetFormModal: FC<Props> = ({ open, onClose }) => {
           label="Tasks"
           disabled={isSubmitting}
           loading={tasksPending}
-          items={taskNames ?? []}
+          items={items}
           placeholder="Select tasks..."
           emptyStateMessage={tasksPending ? 'Loading tasks...' : 'No tasks in this workspace.'}
           useControllerProps={{ name: 'tasks', control }}
           formFieldProps={{
-            slotHelp: 'Each member is pinned to its latest revision when the taskset is created.',
+            slotHelp: taskset
+              ? 'Saving publishes a new revision. Current members stay on their pinned revision; added tasks are pinned to their latest.'
+              : 'Each member is pinned to its latest revision when the taskset is created.',
             ...(tasksError && {
               status: 'error',
               slotError: (
