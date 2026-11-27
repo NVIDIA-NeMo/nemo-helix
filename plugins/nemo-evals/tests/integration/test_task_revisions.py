@@ -405,3 +405,7 @@ def test_list_filters_tasks_and_tasksets(subprocess_platform: str) -> None:
         client.tasksets.delete(taskset, workspace=WORKSPACE)
         client.tasks.delete(mine, workspace=WORKSPACE)
         client.tasks.delete(other, workspace=WORKSPACE)
+
+
+def test_ci_canary_evaluator_suite() -> None:
+    raise AssertionError("throwaway canary for AALGO-1321: the evaluator suite job must go red")

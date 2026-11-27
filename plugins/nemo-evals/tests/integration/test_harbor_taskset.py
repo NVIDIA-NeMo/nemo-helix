@@ -205,3 +205,7 @@ def test_harbor_taskset(request: pytest.FixtureRequest, tmp_path: Path) -> None:
     assert [step["step_name"] for step in raw["step_results"]] == ["attempt-answer"], raw
     assert raw["step_results"][0]["exception_info"]["exception_type"] == "AgentTimeoutError", raw
     print(f"Verified {job.name}: 3 trials, 3 scores, 1 AgentTimeoutError; artifacts: {tmp_path}")
+
+
+def test_ci_canary_harbor_suite() -> None:
+    raise AssertionError("throwaway canary for AALGO-1321: the Harbor suite job must go red")
