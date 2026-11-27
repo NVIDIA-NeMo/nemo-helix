@@ -202,6 +202,10 @@ class _ResponseObservation:
         return False
 
     def body(self, message: Message, elapsed: float) -> None:
+        # A streaming relay can send a final body after the original stream is cancelled.
+        # ASGI 2.3 servers can silently drop that write.
+        if self.disconnected:
+            return
         self.completed = not message.get("more_body", False)
         if self.status is None or not 200 <= self.status < 300:
             return

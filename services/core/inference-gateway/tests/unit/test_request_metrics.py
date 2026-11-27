@@ -19,7 +19,8 @@ from nhx.core.inference_gateway.api import metrics, request_metrics_middleware
 from nhx.core.inference_gateway.api.request_metrics_middleware import InferenceRequestMetricsMiddleware
 from nhx.core.inference_gateway.service import InferenceGatewayService
 from opentelemetry.metrics import Counter, Histogram
-from starlette.requests import ClientDisconnect
+from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
+from starlette.requests import ClientDisconnect, Request
 from starlette.responses import Response, StreamingResponse
 from starlette.types import Message
 
@@ -335,6 +336,45 @@ async def test_stream_disconnect_records_one_cancelled_outcome(observed_metrics,
             await app(scope, receive, send)
 
     assert first_frame_sent.is_set()
+    observed_metrics.assert_request("openai_chat", True, "cancelled", first_output_s=2.0)
+
+
+async def test_relay_cannot_complete_a_stream_after_the_caller_disconnects(observed_metrics):
+    first_frame_sent = asyncio.Event()
+    caller_disconnected = asyncio.Event()
+    delivered: list[Message] = []
+    first_frame = sse_frame(FIRST_CHAT_OUTPUT)
+
+    async def upstream():
+        yield first_frame
+        await asyncio.Future()
+
+    async def passthrough(request: Request, call_next: RequestResponseEndpoint) -> Response:
+        return await call_next(request)
+
+    response = StreamingResponse(upstream(), media_type="text/event-stream")
+    app = InferenceRequestMetricsMiddleware(BaseHTTPMiddleware(response, dispatch=passthrough))
+    scope = {"type": "http", "method": "POST", "path": CHAT_PATH, "asgi": {"spec_version": "2.3"}}
+
+    async def receive() -> Message:
+        await first_frame_sent.wait()
+        caller_disconnected.set()
+        return {"type": "http.disconnect"}
+
+    async def send(message: Message) -> None:
+        # Uvicorn's ASGI 2.3 send returns without writing after a caller close.
+        if caller_disconnected.is_set():
+            return
+        delivered.append(message)
+        if message["type"] == "http.response.body":
+            observed_metrics.clock.return_value = 102.0
+            first_frame_sent.set()
+
+    async with asyncio.timeout(2):
+        await app(scope, receive, send)
+
+    assert delivered[0]["status"] == 200
+    assert delivered[1:] == [{"type": "http.response.body", "body": first_frame, "more_body": True}]
     observed_metrics.assert_request("openai_chat", True, "cancelled", first_output_s=2.0)
 
 
