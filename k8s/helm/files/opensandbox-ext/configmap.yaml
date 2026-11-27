@@ -41,8 +41,11 @@ data:
     A create request whose ``extensions`` carry ``EXTENSION_KEY`` (a JSON ``ComposeServices``) gets
     those services as extra containers in its pod. One that carries ``AGENT_BUNDLE_EXTENSION_KEY`` (a
     JSON ``SandboxAgentBundle``) gets an init container that installs the agent into ``/installed-agent``.
+    One that carries ``OOM_KILL_PROCESS_EXTENSION_KEY`` gets the NRI memory-qos plugin's annotation, when the
+    server sets ``OOM_KILL_PROCESS_ENV_VAR``, so that an out-of-memory kill takes only the process, not the container.
     The stock server copies each extension onto the pod as an annotation (``POD_ANNOTATION``,
-    ``AGENT_BUNDLE_POD_ANNOTATION``), so the spec travels with the manifest:
+    ``AGENT_BUNDLE_POD_ANNOTATION``, ``OOM_KILL_PROCESS_POD_ANNOTATION``), so the spec travels with the
+    manifest:
 
     * ``NemoComposeProvider._merge_pod_spec_extras`` runs on the finished manifest, just before the
       stock code creates it, and adds the bundle (``nemo_ext_pod.add_agent_bundle``) and the services
@@ -64,7 +67,8 @@ data:
 
     ``NemoComposeProvider.get_status`` reports such a sandbox ``Allocated`` once its pod has an IP,
     so create returns while the services start; the client waits for ``main`` (which Kubernetes starts
-    after the services) itself, and reads failures from the services route.
+    after the services) itself, and reads failures from the services route. It also reports a sandbox
+    whose container stopped as ``Failed`` with the container's reason, where the stock status says ``Pending``.
 
     Loaded by ``sitecustomize.py``. Python 3.10, like the server image.
     """
@@ -81,7 +85,15 @@ data:
     from fastapi import APIRouter, HTTPException
     from kubernetes import client as k8s
     from kubernetes.stream import stream
-    from nemo_ext_pod import add_agent_bundle, add_services, agent_bundle_state, move_egress_api, service_states
+    from nemo_ext_pod import (
+        SANDBOX_CONTAINER,
+        add_agent_bundle,
+        add_process_oom_kill,
+        add_services,
+        agent_bundle_state,
+        move_egress_api,
+        service_states,
+    )
     from nhx_sandbox.harbor_opensandbox_services import (
         AGENT_BUNDLE_CONTAINER,
         AGENT_BUNDLE_EXTENSION_KEY,
@@ -89,12 +101,17 @@ data:
         EGRESS_API_PORT_ANNOTATION,
         EXTENSION_FEATURES,
         EXTENSION_KEY,
+        OOM_KILL_PROCESS_POD_ANNOTATION,
         POD_ANNOTATION,
         ComposeServices,
         SandboxAgentBundle,
     )
     from opensandbox_server.config import CONFIG_ENV_VAR
-    from opensandbox_server.services.constants import SANDBOX_EGRESS_AUTH_TOKEN_METADATA_KEY, SANDBOX_ID_LABEL
+    from opensandbox_server.services.constants import (
+        SANDBOX_EGRESS_AUTH_TOKEN_METADATA_KEY,
+        SANDBOX_ID_LABEL,
+        SandboxErrorCodes,
+    )
     from opensandbox_server.services.endpoint_auth import build_egress_auth_headers, merge_endpoint_headers
     from opensandbox_server.services.k8s import kubernetes_service, provider_factory
     from opensandbox_server.services.k8s.batchsandbox_provider import BatchSandboxProvider
@@ -114,6 +131,16 @@ data:
 
     # Under the server's logger tree, which is the only one its logging config enables.
     logger = logging.getLogger("opensandbox_server.nemo_ext")
+
+    # How the NRI memory-qos plugin refuses a container whose annotation its config doesn't list.
+    _REFUSED = "invalid annotation"
+    _stock_is_unschedulable_status = kubernetes_service._is_unschedulable_status
+    # Where a fetched workload carries its pod's stopped or refused container, for get_status to read without I/O.
+    _FAILED_CONTAINER_KEY = "nemoFailedContainer"
+
+    # Set to "true" only where every sandbox node's NRI memory-qos plugin allows memory.oom.group: a plugin that doesn't
+    # rejects the container.
+    OOM_KILL_PROCESS_ENV_VAR = "NEMO_EXT_OOM_KILL_PROCESS"
 
     # The label a server with tenants puts on a tenant's sandboxes and their pods. Spelled out here because
     # ``SANDBOX_TENANT_LABEL`` doesn't exist in servers without tenants, and importing it would stop them.
@@ -173,6 +200,9 @@ data:
             annotations = (template.get("metadata") or {}).get("annotations", {})
             pull_policy = self.image_pull_policy or "IfNotPresent"
 
+            if OOM_KILL_PROCESS_POD_ANNOTATION in annotations and os.environ.get(OOM_KILL_PROCESS_ENV_VAR) == "true":
+                add_process_oom_kill(template.setdefault("metadata", {}))
+
             # pydantic's ValidationError is a ValueError, so the client gets a 400 with every problem listed.
             # The bundle goes first, so the agent is installed before any service starts.
             raw_bundle = annotations.get(AGENT_BUNDLE_POD_ANNOTATION)
@@ -192,16 +222,50 @@ data:
                     workload_annotations = batchsandbox.setdefault("metadata", {}).setdefault("annotations", {})
                     workload_annotations[EGRESS_API_PORT_ANNOTATION] = str(services.egress_api_port)
 
-        def get_status(self, workload: dict[str, Any]) -> dict[str, Any]:
-            """The stock status, except a sandbox with services or a bundle is ``Allocated`` once its pod has an IP.
+        def get_workload(self, sandbox_id: str, namespace: str) -> dict[str, Any] | None:
+            """The stock workload, with its pod's stopped or refused container if it has one."""
+            workload = super().get_workload(sandbox_id, namespace)
+            return self._with_failed_container(workload) if workload else workload
 
-            Kubernetes starts the sandbox container only after every init container and sidecar is up,
-            and the stock create waits for that. Reporting the pod as allocated once it has an IP instead
+        def list_workloads(self, namespace: str, label_selector: str) -> list[dict[str, Any]]:
+            """The stock workloads, each with its pod's stopped or refused container if it has one."""
+            return [self._with_failed_container(workload) for workload in super().list_workloads(namespace, label_selector)]
+
+        def _with_failed_container(self, workload: dict[str, Any]) -> dict[str, Any]:
+            """``workload``, carrying its pod's stopped or refused container when it has been allocated but isn't ready.
+
+            The pod is read here, not in get_status: the stock create wait fetches the workload in a thread but
+            calls get_status on the server's event loop.
+            """
+            status = workload.get("status") or {}
+            if status.get("allocated", 0) > 0 and not status.get("ready") and status.get("phase") in (None, "", "Pending"):
+                failed = self._failed_container(workload)
+                if failed is not None:
+                    workload[_FAILED_CONTAINER_KEY] = list(failed)
+            return workload
+
+        def get_status(self, workload: dict[str, Any]) -> dict[str, Any]:
+            """The stock status, except where the pod says more than the BatchSandbox does.
+
+            A Pending or Allocated sandbox whose pod has a stopped container, or one the runtime refused to create, is
+            ``Failed``, with the container's reason (``OOMKilled``, say) as its message, so a client can
+            tell why its sandbox died. get_workload and list_workloads read the pod; this does no I/O.
+
+            A sandbox with services or a bundle is ``Allocated`` once its pod has an IP. Kubernetes starts
+            the sandbox container only after every init container and sidecar is up, and the stock create
+            waits for that. Reporting the pod as allocated once it has an IP instead
             lets create return (the client looks up its endpoints next, so the IP must be known), and a
             failing or slow service or bundle is seen by the client's wait, not hidden behind the create call.
             """
             status = super().get_status(workload)
-            if status["state"] != "Pending" or not self._parse_pod_ip(workload):
+            failed = workload.get(_FAILED_CONTAINER_KEY)
+            if failed is not None and status["state"] in ("Pending", "Allocated"):
+                reason, message = failed
+                return {**status, "state": "Failed", "reason": reason, "message": message}
+            if status["state"] != "Pending":
+                return status
+
+            if not self._parse_pod_ip(workload):
                 return status
 
             template = (workload.get("spec") or {}).get("template") or {}
@@ -221,6 +285,40 @@ data:
                     "message": "The agent bundle is installing",
                 }
             return status
+
+        def _failed_container(self, workload: dict[str, Any]) -> tuple[str, str] | None:
+            """The status reason and message for the sandbox pod's first stopped or refused container, else None.
+
+            Never raises: a failed lookup leaves the stock status as it was.
+            """
+            metadata = workload.get("metadata") or {}
+            sandbox_id = (metadata.get("labels") or {}).get(SANDBOX_ID_LABEL)
+            if not sandbox_id:
+                return None
+            try:
+                pods = self.k8s_client.list_pods(
+                    namespace=metadata.get("namespace") or self.namespace, label_selector=f"{SANDBOX_ID_LABEL}={sandbox_id}"
+                )
+            except Exception:
+                logger.warning("Could not read sandbox %s's pod to tell why it stopped", sandbox_id, exc_info=True)
+                return None
+            for pod in pods:
+                for container in (pod.status.container_statuses if pod.status is not None else None) or []:
+                    terminated = container.state.terminated if container.state is not None else None
+                    # A service container that finished its work exits 0; the sandbox container never stops on its own.
+                    if terminated is not None and (container.name == SANDBOX_CONTAINER or terminated.exit_code != 0):
+                        return (
+                            "CONTAINER_TERMINATED",
+                            f"container {container.name}: {terminated.reason or 'Terminated'} (exit {terminated.exit_code})",
+                        )
+                    waiting = container.state.waiting if container.state is not None else None
+                    if (
+                        waiting is not None
+                        and waiting.reason == "CreateContainerError"
+                        and _REFUSED in (waiting.message or "")
+                    ):
+                        return "CONTAINER_REFUSED", f"container {container.name}: CreateContainerError: {waiting.message}"
+            return None
 
         def _create_workload_from_pool(self, *args: Any, **kwargs: Any) -> Any:
             """The stock pooled create, refused for a request with services.
@@ -366,6 +464,21 @@ data:
         return "".join(out), "".join(err)
 
 
+    def end_create_wait(status_info: dict[str, Any]) -> bool:
+        """The stock create wait's unschedulable check, which also ends the wait with the message of a Failed sandbox."""
+        if _stock_is_unschedulable_status(status_info):
+            return True
+        if status_info.get("state") == "Failed":
+            raise HTTPException(
+                status_code=500,
+                detail={
+                    "code": SandboxErrorCodes.K8S_POD_FAILED,
+                    "message": f"Sandbox failed to start: {status_info.get('message') or 'no message'}",
+                },
+            )
+        return False
+
+
     def _error(status: int, code: str, message: str) -> HTTPException:
         """An HTTPException in the server's error shape."""
         return HTTPException(status_code=status, detail={"code": f"NEMO::{code}", "message": message})
@@ -454,6 +567,8 @@ data:
         ):
             if not callable(getattr(BatchSandboxProvider, name, None)):
                 raise RuntimeError(f"BatchSandboxProvider.{name} is missing; this server version is unsupported")
+        if not callable(getattr(kubernetes_service, "_is_unschedulable_status", None)):
+            raise RuntimeError("KubernetesSandboxService's create wait has changed; this server version is unsupported")
         if not callable(getattr(kubernetes_service, "_attach_egress_auth_headers", None)):
             raise RuntimeError(
                 "KubernetesSandboxService no longer attaches the egress token; this server version is unsupported"
@@ -468,6 +583,7 @@ data:
         provider_factory.register_provider(provider_factory.PROVIDER_TYPE_BATCHSANDBOX, NemoComposeProvider)
         # The service looks this up by name in its own module on every endpoint request, so this takes effect there.
         kubernetes_service._attach_egress_auth_headers = attach_egress_auth_headers
+        kubernetes_service._is_unschedulable_status = end_create_wait
         import opensandbox_server.main as server_main
 
         server_main.app.include_router(router)
@@ -491,6 +607,8 @@ data:
     * Host aliases resolve every service name, and ``main``, to 127.0.0.1.
     * Each container's ``security`` narrows its ``securityContext``, and each ``tmpfs`` becomes a
       memory-backed ``emptyDir`` mounted only in that container.
+    * An OOM kill request annotates the pod so the NRI memory-qos plugin, where a node runs it, kills
+      only the process in ``sandbox`` that ran out of memory.
 
     Pure functions over manifest dicts and kubernetes ``V1Pod`` objects; no API calls.
     """
@@ -525,6 +643,10 @@ data:
     # mounts its own folder at one of them gets its own instead: both are empty writable folders.
     REPLACEABLE_TEMPLATE_MOUNTS = frozenset({"/logs", "/solution"})
 
+    # The NRI memory-qos plugin's annotation for ``sandbox``'s ``memory.oom.group``:
+    # https://containers.github.io/nri-plugins/stable/docs/memory/memory-qos.html
+    NRI_OOM_GROUP_ANNOTATION = f"memory.oom.group.memory-qos.nri.io/{SANDBOX_CONTAINER}"
+
     # Probes run every second, so failure thresholds are roughly seconds while checks answer quickly: a
     # service gets ~10 minutes to become ready once it runs, egress 2 minutes.
     STARTUP_PROBE_FAILURES = 600
@@ -538,7 +660,14 @@ data:
     CRASH_RESTARTS = 3
     # Waiting reasons that never clear on their own.
     FATAL_WAITING_REASONS = frozenset(
-        {"ErrImagePull", "ImagePullBackOff", "InvalidImageName", "ErrImageNeverPull", "CreateContainerConfigError"}
+        {
+            "ErrImagePull",
+            "ImagePullBackOff",
+            "InvalidImageName",
+            "ErrImageNeverPull",
+            "CreateContainerConfigError",
+            "ImageInspectError",
+        }
     )
 
 
@@ -718,6 +847,14 @@ data:
             "securityContext": {"privileged": False, "capabilities": {"drop": ["NET_ADMIN", "NET_RAW"]}},
         }
         init.append(bundle_container)
+
+
+    def add_process_oom_kill(template_metadata: dict[str, Any]) -> None:
+        """Ask the NRI memory-qos plugin to kill only the process in ``sandbox`` that runs out of memory, as Docker does.
+
+        A node without the plugin ignores the annotation.
+        """
+        template_metadata.setdefault("annotations", {})[NRI_OOM_GROUP_ANNOTATION] = "0"
 
 
     def agent_bundle_state(pod: Any) -> tuple[str | None, bool]:
@@ -993,6 +1130,10 @@ data:
     # The init container that installs the bundle, and where it puts the agent in ``main``.
     AGENT_BUNDLE_CONTAINER = "agent-bundle"
     INSTALLED_AGENT_DIR = "/installed-agent"
+
+    # The OOM kill request's extensions key and pod annotation, copied the same way as the services'. Its value is unused.
+    OOM_KILL_PROCESS_EXTENSION_KEY = "opensandbox.extensions.nemo-oom-kill-process"
+    OOM_KILL_PROCESS_POD_ANNOTATION = "opensandbox.io/extensions.nemo-oom-kill-process"
 
     # Names the sandbox pod already uses: its containers (sandbox, egress, execd-installer, and the
     # agent bundle's), and ``main``, which every container resolves to 127.0.0.1.

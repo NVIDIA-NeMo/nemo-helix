@@ -85,6 +85,10 @@ AGENT_BUNDLE_POD_ANNOTATION = "opensandbox.io/extensions.nemo-agent-bundle"
 AGENT_BUNDLE_CONTAINER = "agent-bundle"
 INSTALLED_AGENT_DIR = "/installed-agent"
 
+# The OOM kill request's extensions key and pod annotation, copied the same way as the services'. Its value is unused.
+OOM_KILL_PROCESS_EXTENSION_KEY = "opensandbox.extensions.nemo-oom-kill-process"
+OOM_KILL_PROCESS_POD_ANNOTATION = "opensandbox.io/extensions.nemo-oom-kill-process"
+
 # Names the sandbox pod already uses: its containers (sandbox, egress, execd-installer, and the
 # agent bundle's), and ``main``, which every container resolves to 127.0.0.1.
 RESERVED_NAMES = frozenset({MAIN_SERVICE, "sandbox", "egress", "execd-installer", AGENT_BUNDLE_CONTAINER})

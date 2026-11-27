@@ -188,6 +188,52 @@ when scaled-evals runs with `SANDBOX_K8S_TASK_IMAGE_REFERENCE_MODE=tag` (which
 hosted mode requires). A tag is checked to still resolve to the registered
 digest at launch.
 
+### Out-of-memory kills
+
+On Kubernetes 1.28 and later with cgroup v2, the kernel kills every process in a
+container when one of them runs out of memory, unless the node's kubelet sets
+`singleProcessOOMKill: true`. Docker kills only that process, so under Docker an
+agent survives a tool it launched running out of memory, and in a sandbox it
+doesn't.
+
+NeMo Evals' Harbor sandboxes ask for Docker's behaviour with
+`extensions["opensandbox.extensions.nemo-oom-kill-process"]`. On a server that
+sets `NEMO_EXT_OOM_KILL_PROCESS=true`, the extension turns the request into the
+pod annotation `memory.oom.group.memory-qos.nri.io/sandbox: "0"`, and the
+[NRI memory-qos plugin](https://containers.github.io/nri-plugins/stable/docs/memory/memory-qos.html)
+gives the `sandbox` container `memory.oom.group=0`. Only the process that ran
+out of memory then dies, as under Docker. Without the setting, the request does
+nothing.
+
+Sandboxed Gym hosts don't ask for it. Their processes are servers that every
+rollout goes through, and nothing restarts one that's killed, so a host that
+runs out of memory is better killed whole and reported as out of memory.
+
+A node without the plugin ignores the annotation, but a plugin whose list
+leaves it out, such as the chart's default, rejects the container with
+`CreateContainerError`, so no sandbox starts: each create fails with the
+plugin's `invalid annotation: "memory.oom.group"`. Set it only when every
+sandbox node's plugin allows it. With the plugin's Helm chart:
+
+```yaml
+config:
+  unifiedAnnotations:
+    - memory.swap.max
+    - memory.high
+    - memory.oom.group
+```
+
+Then add the setting to the server's environment, next to `PYTHONPATH`:
+
+```yaml
+- name: NEMO_EXT_OOM_KILL_PROCESS
+  value: "true"
+```
+
+The plugin needs NRI on in the node's container runtime: on by default in
+containerd 2.x; for CRI-O, check `enable_nri` in its config. Kata sandboxes
+don't need any of this: their guest kernel kills only the process.
+
 ### Enable it with the chart
 
 The NeMo Helix chart ships the extension, so you don't need a checkout of the
@@ -299,7 +345,7 @@ compose task at its first check, before any sandbox starts.
 | --- | --- |
 | The server crash-loops with `nemo-ext: not starting without the compose services extension` | The ConfigMap is present but the extension can't load: a changed file, or a server version other than `v0.2.1`. The log above the message has the reason. |
 | No `nemo-ext` line in the server log | The ConfigMap is missing, in the wrong namespace, or the server wasn't restarted since it was created. |
-| `GET /v1/nemo-ext/health` doesn't answer | The server runs stock. Same causes as the line above. A working server answers `{"status":"ok","extension":"nemo-compose-services","features":["compose-services","agent-bundle"]}`. |
+| `GET /v1/nemo-ext/health` doesn't answer | The server runs stock. Same causes as the line above. A working server answers `{"status":"ok","extension":"nemo-compose-services","features":["compose-services","agent-bundle","compose-main","compose-security","egress-port"]}`. |
 | A trial with an agent bundle fails with `doesn't support agent bundles` | The extension predates agent bundles: its health answer has no `features`. Upgrade the chart and restart the server. |
 | A trial fails with `agent bundle ErrImagePull` or `ImagePullBackOff` | The bundle's registry isn't covered by the template's `imagePullSecrets`. |
 | A compose task fails reading service status or running a command in a service, with a permission error | The Role is missing in the sandbox namespace, or bound to the wrong ServiceAccount. Check `sandboxNamespace` and `serverServiceAccount`. |

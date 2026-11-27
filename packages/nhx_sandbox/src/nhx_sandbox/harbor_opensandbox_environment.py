@@ -85,6 +85,7 @@ from nhx_sandbox.harbor_opensandbox_services import (
     EGRESS_PORT_FEATURE,
     EXTENSION_KEY,
     MAIN_SERVICE,
+    OOM_KILL_PROCESS_EXTENSION_KEY,
     ComposeServices,
     SandboxAgentBundle,
     keep_alive_entrypoint,
@@ -513,6 +514,9 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
             extensions[AGENT_BUNDLE_EXTENSION_KEY] = self._agent_bundle.to_json()
         if self._services is not None:
             extensions[EXTENSION_KEY] = self._services.to_json()
+        # Kill only the process that runs out of memory, as Docker does, where the OpenSandbox server enables it.
+        if self._runtime == "kubernetes":
+            extensions[OOM_KILL_PROCESS_EXTENSION_KEY] = "true"
         return extensions
 
     def _as_written(self, text: str) -> str:

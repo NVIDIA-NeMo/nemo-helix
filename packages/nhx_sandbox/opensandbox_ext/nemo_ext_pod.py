@@ -16,6 +16,8 @@ network policy, and an ``execd-installer`` init container. Kubernetes does all t
 * Host aliases resolve every service name, and ``main``, to 127.0.0.1.
 * Each container's ``security`` narrows its ``securityContext``, and each ``tmpfs`` becomes a
   memory-backed ``emptyDir`` mounted only in that container.
+* An OOM kill request annotates the pod so the NRI memory-qos plugin, where a node runs it, kills
+  only the process in ``sandbox`` that ran out of memory.
 
 Pure functions over manifest dicts and kubernetes ``V1Pod`` objects; no API calls.
 """
@@ -50,6 +52,10 @@ INSTALLED_AGENT_VOLUME = "nemo-installed-agent"
 # mounts its own folder at one of them gets its own instead: both are empty writable folders.
 REPLACEABLE_TEMPLATE_MOUNTS = frozenset({"/logs", "/solution"})
 
+# The NRI memory-qos plugin's annotation for ``sandbox``'s ``memory.oom.group``:
+# https://containers.github.io/nri-plugins/stable/docs/memory/memory-qos.html
+NRI_OOM_GROUP_ANNOTATION = f"memory.oom.group.memory-qos.nri.io/{SANDBOX_CONTAINER}"
+
 # Probes run every second, so failure thresholds are roughly seconds while checks answer quickly: a
 # service gets ~10 minutes to become ready once it runs, egress 2 minutes.
 STARTUP_PROBE_FAILURES = 600
@@ -63,7 +69,14 @@ PROBE_TIMEOUT_SECONDS = 30
 CRASH_RESTARTS = 3
 # Waiting reasons that never clear on their own.
 FATAL_WAITING_REASONS = frozenset(
-    {"ErrImagePull", "ImagePullBackOff", "InvalidImageName", "ErrImageNeverPull", "CreateContainerConfigError"}
+    {
+        "ErrImagePull",
+        "ImagePullBackOff",
+        "InvalidImageName",
+        "ErrImageNeverPull",
+        "CreateContainerConfigError",
+        "ImageInspectError",
+    }
 )
 
 
@@ -243,6 +256,14 @@ def add_agent_bundle(pod_spec: dict[str, Any], bundle: SandboxAgentBundle, image
         "securityContext": {"privileged": False, "capabilities": {"drop": ["NET_ADMIN", "NET_RAW"]}},
     }
     init.append(bundle_container)
+
+
+def add_process_oom_kill(template_metadata: dict[str, Any]) -> None:
+    """Ask the NRI memory-qos plugin to kill only the process in ``sandbox`` that runs out of memory, as Docker does.
+
+    A node without the plugin ignores the annotation.
+    """
+    template_metadata.setdefault("annotations", {})[NRI_OOM_GROUP_ANNOTATION] = "0"
 
 
 def agent_bundle_state(pod: Any) -> tuple[str | None, bool]:

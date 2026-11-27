@@ -30,6 +30,10 @@ _EXPIRED_REASON = "SANDBOX_EXPIRED"
 _EVENT_LINE = re.compile(r"^\[[^\]]+\]\s+(?P<type>\S+)\s+(?P<reason>\S+)\s*(?P<message>.*)$")
 # At most this many warning events are kept, the latest ones.
 MAX_EVENTS = 10
+# The NeMo extension's message for a stopped container: "container <name>: <reason> (exit <code>)".
+_CONTAINER_MESSAGE = re.compile(r"^container (?P<name>\S+): ")
+# The agent's own container in the sandbox pod; the rest are the task's compose services.
+_SANDBOX_CONTAINER = "sandbox"
 
 
 class ServerClient(Protocol):
@@ -127,11 +131,25 @@ def diagnose_from_status(
         detail = f"Kubernetes evicted the sandbox pod: {evicted.removeprefix('Evicted:').strip()}"
         return TerminationDiagnosis(TerminationCause.EVICTED, detail, evidence)
 
+    container = _CONTAINER_MESSAGE.match(message or "")
+    if container is not None and container["name"] != _SANDBOX_CONTAINER:
+        # A compose service stopped, not the agent's container: its memory limit is the task's, not the sandbox's.
+        service = container["name"]
+        killed = "ran out of memory" if "OOMKilled" in (message or "") else "stopped"
+        detail = f"the sandbox's {service} service container {killed}; {reported}"
+        return TerminationDiagnosis(TerminationCause.UNKNOWN, detail, evidence)
+
     if any("OOMKilled" in text for text in [message or "", *events]):
         return TerminationDiagnosis(
             TerminationCause.OUT_OF_MEMORY, f"the sandbox ran out of memory; {reported}", evidence
         )
 
+    if state == "Pending":
+        # A sandbox that was ready once and reads Pending again died; "being created" would mislead.
+        reported = (
+            f"server reported {state}" + (f" ({reason})" if reason else "") + ", as it does for a sandbox whose "
+            "container stopped; the NeMo OpenSandbox extension (nemo-opensandbox-ext) reports the container's reason"
+        )
     detail = f"the sandbox stopped; {reported}" + (f"; events: {'; '.join(events)}" if events else "")
 
     return TerminationDiagnosis(TerminationCause.UNKNOWN, detail, evidence)
