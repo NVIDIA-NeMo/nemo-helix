@@ -4639,6 +4639,7 @@ nemo-helix-plugin = [
     { name = "pyjwt" },
     { name = "pyyaml" },
     { name = "typer" },
+    { name = "uvicorn" },
 ]
 retrieval-sdg = [
     { name = "data-designer-retrieval-sdg" },
@@ -4685,6 +4686,7 @@ requires-dist = [
     { name = "pytest-asyncio", marker = "extra == 'test'", specifier = ">=0.23" },
     { name = "pyyaml", marker = "extra == 'nemo-helix-plugin'", specifier = ">=6.0.2" },
     { name = "typer", marker = "extra == 'nemo-helix-plugin'", specifier = ">=0.20.0,<0.26" },
+    { name = "uvicorn", marker = "extra == 'nemo-helix-plugin'", specifier = ">=0.32.1" },
 ]
 provides-extras = ["retrieval-sdg", "test", "data-designer-nemo", "nemo-helix-plugin"]
 
@@ -5784,6 +5786,7 @@ nemo-helix-plugin = [
     { name = "pyjwt" },
     { name = "pyyaml" },
     { name = "typer" },
+    { name = "uvicorn" },
 ]
 nemo-ngc-plugin = [
     { name = "httpx" },
@@ -7127,6 +7130,7 @@ requires-dist = [
     { name = "uvicorn", marker = "extra == 'intake-service'", specifier = ">=0.22.0,<1.0.0" },
     { name = "uvicorn", marker = "extra == 'jobs-service'", specifier = ">=0.34.0" },
     { name = "uvicorn", marker = "extra == 'models-service'", specifier = ">=0.34.0" },
+    { name = "uvicorn", marker = "extra == 'nemo-helix-plugin'", specifier = ">=0.32.1" },
     { name = "uvicorn", marker = "extra == 'nemo-safe-synthesizer-plugin'", specifier = ">=0.32.1" },
     { name = "uvicorn", marker = "extra == 'plugins'", specifier = ">=0.32.1" },
     { name = "uvicorn", marker = "extra == 'secrets-service'", specifier = ">=0.34.0" },
@@ -7226,6 +7230,7 @@ dependencies = [
     { name = "pyjwt" },
     { name = "pyyaml" },
     { name = "typer" },
+    { name = "uvicorn" },
 ]
 
 [package.optional-dependencies]
@@ -7313,6 +7318,7 @@ requires-dist = [
     { name = "sacrebleu", marker = "extra == 'nhx-evals-sdk'", specifier = ">=2.5.1" },
     { name = "typer", specifier = ">=0.20.0,<0.26" },
     { name = "typer", marker = "extra == 'nemo-helix-ext'", specifier = ">=0.20.0" },
+    { name = "uvicorn", specifier = ">=0.32.1" },
 ]
 provides-extras = ["filesets", "nemo-helix-ext", "nhx-evals-sdk"]
 
@@ -7586,6 +7592,7 @@ nemo-helix-plugin = [
     { name = "pyjwt" },
     { name = "pyyaml" },
     { name = "typer" },
+    { name = "uvicorn" },
 ]
 test = [
     { name = "fastapi" },
@@ -7626,6 +7633,7 @@ requires-dist = [
     { name = "typer", specifier = ">=0.9.0" },
     { name = "typer", marker = "extra == 'nemo-helix-plugin'", specifier = ">=0.20.0,<0.26" },
     { name = "uvicorn", specifier = ">=0.32.1" },
+    { name = "uvicorn", marker = "extra == 'nemo-helix-plugin'", specifier = ">=0.32.1" },
 ]
 provides-extras = ["test", "nemo-helix-plugin"]
 

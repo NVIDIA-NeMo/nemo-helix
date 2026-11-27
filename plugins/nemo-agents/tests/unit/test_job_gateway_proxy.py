@@ -20,6 +20,7 @@ from nemo_agents_plugin.agent_config import AgentConfig
 from nemo_agents_plugin.fabric.invocation import AgentConfigInvocationRequest
 from nemo_agents_plugin.fabric.runtime import FabricRuntimeResult
 from nemo_agents_plugin.jobs import execute, gateway_proxy
+from nemo_helix_plugin.client import auth_proxy_server
 from nemo_helix_plugin.client.auth import StaticToken
 from nemo_helix_plugin.job_context import JobContext
 from pytest_httpserver import HTTPServer
@@ -53,7 +54,7 @@ def workload(monkeypatch: pytest.MonkeyPatch, httpserver: HTTPServer) -> Mock:
     monkeypatch.setenv("NHX_WORKLOAD_IDENTITY_TOKEN_FILE", "/job/proof-token")
     monkeypatch.setenv("NHX_BASE_URL", httpserver.url_for(""))
     factory = Mock(return_value=StaticToken("job-access-token"))
-    monkeypatch.setattr(gateway_proxy, "resolve_workload_exchange_provider", factory)
+    monkeypatch.setattr(auth_proxy_server, "resolve_workload_exchange_provider", factory)
     return factory
 
 
@@ -62,6 +63,11 @@ def _assert_closed(url: str) -> None:
     with socket.socket() as connection:
         connection.settimeout(1)
         assert connection.connect_ex((parsed.hostname, parsed.port)) != 0
+
+
+def test_old_import_path_resolves_to_the_shared_proxy_helpers() -> None:
+    assert gateway_proxy.platform_auth_proxy is auth_proxy_server.platform_auth_proxy
+    assert gateway_proxy.serve_auth_proxy is auth_proxy_server.serve_auth_proxy
 
 
 def test_rebases_all_gateway_models_without_mutating_input(workload: Mock) -> None:
@@ -184,7 +190,7 @@ def test_a_job_with_no_identity_runs_without_a_proxy(
     if principal is not None:
         monkeypatch.setenv("NHX_PRINCIPAL", principal)
     principal_client = Mock(side_effect=AssertionError("Must not resolve principal headers"))
-    monkeypatch.setattr(gateway_proxy, "get_nemo_client", principal_client)
+    monkeypatch.setattr(auth_proxy_server, "get_nemo_client", principal_client)
 
     with gateway_proxy.platform_auth_proxy() as origin:
         assert origin is None
@@ -276,7 +282,7 @@ def test_workload_identity_takes_precedence_without_fallback(
 ) -> None:
     monkeypatch.setenv("NHX_PRINCIPAL", '{"id":"job-user"}')
     principal_client = Mock(side_effect=AssertionError("Must not resolve principal headers"))
-    monkeypatch.setattr(gateway_proxy, "get_nemo_client", principal_client)
+    monkeypatch.setattr(auth_proxy_server, "get_nemo_client", principal_client)
     if exchange_fails:
         workload.return_value = Mock(get_access_token=Mock(side_effect=RuntimeError("exchange unavailable")))
         with pytest.raises(RuntimeError, match="exchange unavailable"):
@@ -404,8 +410,8 @@ def test_startup_failure_closes_listener(monkeypatch: pytest.MonkeyPatch, worklo
             while not self.should_exit:
                 time.sleep(0.01)
 
-    monkeypatch.setattr(gateway_proxy, "Server", _Server)
-    monkeypatch.setattr(gateway_proxy, "_STARTUP_TIMEOUT_SECONDS", 0.05)
+    monkeypatch.setattr(auth_proxy_server, "Server", _Server)
+    monkeypatch.setattr(auth_proxy_server, "_STARTUP_TIMEOUT_SECONDS", 0.05)
     with pytest.raises((RuntimeError, TimeoutError), match="proxy"):
         with gateway_proxy.platform_auth_proxy():
             pytest.fail("Must not invoke the agent")
@@ -557,7 +563,7 @@ def test_auth_disabled_direct_job_runs_without_a_proxy_or_base_url_override(
     monkeypatch.delenv("NHX_PRINCIPAL", raising=False)
     monkeypatch.setenv("NHX_BASE_URL", "http://localhost:8080")
     resolver = Mock(side_effect=AssertionError("Must not resolve credentials"))
-    monkeypatch.setattr(gateway_proxy, "resolve_workload_exchange_provider", resolver)
+    monkeypatch.setattr(auth_proxy_server, "resolve_workload_exchange_provider", resolver)
 
     config = _direct_config().model_dump()
     config["environment"]["env"]["NHX_BASE_URL"] = "http://localhost:8080"
@@ -600,7 +606,7 @@ def test_direct_inference_identity_job_degrades_when_the_proxy_cannot_start(
     arm of the start gating directly, not only the shared optional wrapper.
     """
     monkeypatch.setattr(
-        gateway_proxy,
+        auth_proxy_server,
         "resolve_workload_exchange_provider",
         Mock(side_effect=RuntimeError("auth discovery unavailable")),
     )

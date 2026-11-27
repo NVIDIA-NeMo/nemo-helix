@@ -37,6 +37,7 @@ dependencies = [
     # attribute 'strip'` from `BoolParamType.str_to_bool`, breaking commands
     # like `nemo services run`. Drop the upper bound once typer ships a fix.
     "typer>=0.20.0,<0.26",
+    "uvicorn>=0.32.1",
 ]
 license = "Apache-2.0"
 
