@@ -76,6 +76,9 @@ outputs:
   deployments-openshell:
     description: "'true' if OpenShell deployment or credential authorization dependencies changed"
     value: ${{ steps.filter.outputs.deployments-openshell }}
+  go:
+    description: "'true' if Go source, modules, or Go CI configuration changed"
+    value: ${{ steps.filter.outputs.go }}
   jobs-openshell:
     description: "'true' if the jobs service or jobs-launcher changed (OpenShell job backend coverage)"
     value: ${{ steps.filter.outputs.jobs-openshell }}
@@ -355,6 +358,18 @@ runs:
             - 'services/core/entities/**'
             - 'services/core/secrets/**'
             - 'services/core/jobs/src/nhx/core/jobs/controllers/backends/openshell/**'
+          go:
+            - '**/*.go'
+            - '**/go.mod'
+            - '**/go.sum'
+            - '**/go.work'
+            - '**/go.work.sum'
+            - '**/testdata/**'
+            - '.github/scripts/go-modules.sh'
+            - 'docker/base/Dockerfile.nhx-jobs-launcher'
+            - 'tools/go/**'
+            - '.github/workflows/ci.yaml'
+            - '.github/actions/changes/**'
           jobs-openshell:
             - 'services/core/jobs/**'
             - 'packages/nemo_helix_plugin/**'

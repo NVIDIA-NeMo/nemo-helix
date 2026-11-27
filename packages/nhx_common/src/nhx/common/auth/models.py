@@ -145,6 +145,7 @@ class Principal(BaseModel):
     This model encapsulates the identity and authorization context for a request.
     """
 
+    verified_workload_delegation: bool = Field(default=False, exclude=True, repr=False)
     id: str = Field(default="", description="The principal's unique identifier")
     account_id: Optional[str] = Field(None, description="Stable NeMo account identifier resolved for this principal")
     email: Optional[str] = Field(None, description="The principal's email address")
