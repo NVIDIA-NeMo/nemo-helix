@@ -3,10 +3,14 @@
 
 """NeMo Studio Assistant tool implementations exposed through MCP."""
 
+import hashlib
 import inspect
 import json
 import os
 import re
+import secrets
+import threading
+import time
 import types
 import typing
 import uuid
@@ -35,14 +39,19 @@ from nemo_helix_plugin.secrets.client import SecretsClient
 from nemo_helix_plugin.virtual_models.client import VirtualModelsClient
 from nemo_helix_plugin.virtual_models.types import CreateVirtualModelRequest
 from nemo_helix_plugin.workspaces.client import WorkspacesClient
+from nemo_studio_assistant import docs_search
 from pydantic import BaseModel, Field
 
 DEFAULT_WORKSPACE = "default"
 STUDIO_CALLBACK_PATH = "/studio/api/assistant/mcp/{session_id}"
 STUDIO_CALLBACK_TIMEOUT_SECONDS = 3600.0
+STUDIO_ACTIVITY_TIMEOUT_SECONDS = 5.0
 _READ_ONLY_ACTIONS = frozenset({"check", "get", "get_logs", "get_status", "list", "read", "retrieve", "search"})
 _API_ERROR_LIMIT = 3
 _GUARDRAIL_CHECK_FAILURE_LIMIT = 3
+# A tripped validation lockout expires this long after its last failure, so a terminal workspace key
+# is not refused until the MCP process restarts.
+_GUARDRAIL_CHECK_COOLDOWN_SECONDS = 300.0
 _REFUSAL_LIKE_PROBE_RE = re.compile(
     r"^\s*(?:(?:i(?:'m| am)|we(?:'re| are))\s+sorry[,;:]?\s*(?:but\s+)?)?"
     r"(?:(?:i|we)\s+(?:can't|cannot|won't|will not|am unable to|are unable to)|"
@@ -51,11 +60,30 @@ _REFUSAL_LIKE_PROBE_RE = re.compile(
     re.IGNORECASE,
 )
 
+APPROVAL_MODE_ENV = "ASSISTANT_APPROVAL_MODE"
+APPROVAL_MODE_STUDIO = "studio"
+APPROVAL_MODE_CHAT = "chat"
+APPROVAL_MODES = frozenset({APPROVAL_MODE_STUDIO, APPROVAL_MODE_CHAT})
+CONFIRMATION_TTL_SECONDS = 600.0
+
 _clients: dict[str, NemoClient] = {}
 _api_error_streaks: dict[str, int] = {}
 _guardrail_check_failures: dict[str, int] = {}
+_guardrail_check_failed_at: dict[str, float] = {}
 _preflighted_guardrail_models: set[tuple[str, str, str]] = set()
 _guardrail_deployment_results: dict[tuple[str, str], str | None] = {}
+_state_lock = threading.Lock()
+
+
+@dataclass(frozen=True)
+class _PendingConfirmation:
+    """A terminal write awaiting the user's yes: the operation it previews and when the preview lapses."""
+
+    fingerprint: str
+    expires_at: float
+
+
+_pending_confirmations: dict[str, _PendingConfirmation] = {}
 
 
 class ApiPathError(ValueError):
@@ -72,6 +100,93 @@ class GuardrailWorkflowError(RuntimeError):
 
 def _active_workspace() -> str:
     return os.environ.get("NHX_WORKSPACE") or DEFAULT_WORKSPACE
+
+
+def approval_mode() -> str:
+    """Return how writes are approved: Studio's approval card, or a terminal confirmation token."""
+    mode = (os.environ.get(APPROVAL_MODE_ENV) or APPROVAL_MODE_STUDIO).strip().lower()
+    if mode not in APPROVAL_MODES:
+        raise RuntimeError(f"{APPROVAL_MODE_ENV} must be one of {sorted(APPROVAL_MODES)}; received {mode!r}")
+    return mode
+
+
+def _operation_fingerprint(tool_name: str, tool_input: dict[str, Any]) -> str:
+    """Hash the operation a write would perform, with JSON-string params canonicalized."""
+    canonical = dict(tool_input)
+    params = canonical.get("params")
+    if isinstance(params, str):
+        canonical["params"] = json.loads(params) if params.strip() else None
+    payload = json.dumps({"tool": tool_name, "input": canonical}, sort_keys=True, default=str)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _describe_terminal_operation(tool_name: str, tool_input: dict[str, Any]) -> str:
+    if tool_name == "deploy_guardrail":
+        workspace = tool_input["workspace"]
+        return (
+            f"Create guardrail config {workspace}/{tool_input['config_name']} "
+            f"(create: {tool_input['create_config']}) and VirtualModel {workspace}/{tool_input['virtual_model_name']} "
+            f"(create: {tool_input['create_virtual_model']}) on backend model {tool_input['backend_model']}, "
+            f"blocking policy: {tool_input['policy']}"
+        )
+    params = tool_input.get("params")
+    params_text = params if isinstance(params, str) else json.dumps(params, sort_keys=True, default=str)
+    return (
+        f"{tool_input['action']} {tool_input['resource']} in workspace {tool_input['workspace']}"
+        f" with params {params_text or '{}'}"
+    )
+
+
+def _terminal_confirmation(
+    tool_name: str, tool_input: dict[str, Any], confirmation_token: str | None
+) -> dict[str, Any] | str:
+    """Gate a write in terminal mode.
+
+    Without a token, return a JSON preview and a single-use token for the agent to show the user. With a
+    token, return the approved input only if the token was issued for this exact operation and is still
+    live; any token is consumed by the attempt. Returns the approved input (a dict) on success.
+    """
+    fingerprint = _operation_fingerprint(tool_name, tool_input)
+    with _state_lock:
+        # Read the clock after acquiring the lock so expiry is judged at the moment the token is consumed.
+        now = time.monotonic()
+        for token in [t for t, pending in _pending_confirmations.items() if pending.expires_at <= now]:
+            del _pending_confirmations[token]
+        if confirmation_token is not None:
+            pending = _pending_confirmations.pop(confirmation_token, None)
+            if pending is None:
+                return json.dumps(
+                    {
+                        "status": "confirmation_rejected",
+                        "error": "the confirmation token is unknown, expired, or was already used; "
+                        "preview the operation again",
+                    }
+                )
+            if pending.fingerprint != fingerprint:
+                return json.dumps(
+                    {
+                        "status": "confirmation_rejected",
+                        "error": "the confirmation token was issued for a different operation; "
+                        "the token was consumed, so preview the operation again",
+                    }
+                )
+            return tool_input
+        token = secrets.token_urlsafe(24)
+        _pending_confirmations[token] = _PendingConfirmation(fingerprint, now + CONFIRMATION_TTL_SECONDS)
+    return json.dumps(
+        {
+            "status": "confirmation_required",
+            "summary": _describe_terminal_operation(tool_name, tool_input),
+            "confirmation_token": token,
+            "next_step": (
+                "Show the summary to the user and ask whether to proceed. Only after they say yes, repeat "
+                "this exact call with the same arguments and confirmation_token set to this token. "
+                "If they say no, drop the token and do not run the operation."
+            ),
+            "expires_in_seconds": int(CONFIRMATION_TTL_SECONDS),
+        },
+        indent=2,
+    )
 
 
 def _get_client(workspace: str) -> NemoClient:
@@ -314,7 +429,15 @@ def _build_call_kwargs(
             parameters=[p for p in inspect.signature(descriptor).parameters.values() if p.name != "self"]
         )
         hints = typing.get_type_hints(descriptor)
-    remaining = {aliases.get(key, key): value for key, value in (params or {}).items() if key != "workspace"}
+    remaining: dict[str, Any] = {}
+    for key, value in (params or {}).items():
+        if key == "workspace":
+            continue
+        canonical_key = aliases.get(key, key)
+        if canonical_key in remaining and remaining[canonical_key] != value:
+            # Without this, the later key would silently win and key order would pick the target.
+            raise ValueError(f"conflicting values for {canonical_key!r}; give it once, as {canonical_key!r}")
+        remaining[canonical_key] = value
     kwargs: dict[str, Any] = {}
     if "workspace" in signature.parameters:
         kwargs["workspace"] = workspace
@@ -386,8 +509,9 @@ def _api_error_key(workspace: str, studio_session_id: str | None) -> str:
 
 
 def _record_api_error(key: str, exc: Exception) -> str:
-    count = _api_error_streaks.get(key, 0) + 1
-    _api_error_streaks[key] = count
+    with _state_lock:
+        count = _api_error_streaks.get(key, 0) + 1
+        _api_error_streaks[key] = count
     if count >= _API_ERROR_LIMIT:
         return (
             f"Error circuit breaker: {count} consecutive nemo_api calls failed. "
@@ -401,9 +525,30 @@ def _is_guardrail_check(resource: str, action: str) -> bool:
     return resource.strip() == "guardrail" and action.strip().lower() == "check"
 
 
+def _guardrail_check_locked_out(key: str) -> bool:
+    """Return True while validation is refused for ``key`` after too many failures.
+
+    The lockout ends ``_GUARDRAIL_CHECK_COOLDOWN_SECONDS`` after the last failure, and the count is cleared then.
+    """
+    with _state_lock:
+        if _guardrail_check_failures.get(key, 0) < _GUARDRAIL_CHECK_FAILURE_LIMIT:
+            return False
+        if time.monotonic() - _guardrail_check_failed_at.get(key, 0.0) < _GUARDRAIL_CHECK_COOLDOWN_SECONDS:
+            return True
+        _guardrail_check_failures.pop(key, None)
+        _guardrail_check_failed_at.pop(key, None)
+        return False
+
+
 def _record_guardrail_check_failure(key: str, message: str) -> str:
-    count = _guardrail_check_failures.get(key, 0) + 1
-    _guardrail_check_failures[key] = count
+    with _state_lock:
+        count = _guardrail_check_failures.get(key, 0) + 1
+        _guardrail_check_failures[key] = count
+        _guardrail_check_failed_at[key] = time.monotonic()
+    return _guardrail_check_failure_message(count, message)
+
+
+def _guardrail_check_failure_message(count: int, message: str) -> str:
     prefix = "Guardrail validation stopped"
     if count >= _GUARDRAIL_CHECK_FAILURE_LIMIT:
         return (
@@ -543,29 +688,46 @@ def _matches_fields(value: Any, expected: dict[str, Any]) -> bool:
     return _contains_expected_fields(_serialize(value), expected)
 
 
+def _report_activity(
+    studio_session_id: str | None,
+    tool_name: str,
+    summary: str,
+    *,
+    workspace: str | None = None,
+    **fields: str | None,
+) -> None:
+    """Show a progress step for a tool call in the Studio chat."""
+    if not studio_session_id or approval_mode() == APPROVAL_MODE_CHAT:
+        return
+    try:
+        _call_studio_tool(
+            _validated_session_id(studio_session_id),
+            "assistant_activity",
+            {"tool_name": tool_name, "summary": summary, **{key: value for key, value in fields.items() if value}},
+            workspace=workspace,
+            timeout=STUDIO_ACTIVITY_TIMEOUT_SECONDS,
+        )
+    except Exception:
+        # Activity is presentation-only and must never change the tool result.
+        return
+
+
 def _report_workflow_activity(
-    studio_session_id: str,
+    studio_session_id: str | None,
     step: str,
     *,
     status: str = "completed",
     detail: str | None = None,
     workspace: str,
 ) -> None:
-    try:
-        _call_studio_tool(
-            studio_session_id,
-            "assistant_activity",
-            {
-                "tool_name": "deploy_guardrail",
-                "status": status,
-                "step": step,
-                "detail": detail,
-            },
-            workspace=workspace,
-        )
-    except Exception:
-        # Activity is presentation-only and must never change the platform result.
-        return
+    _report_activity(
+        studio_session_id,
+        "deploy_guardrail",
+        detail or step,
+        workspace=workspace,
+        status=status,
+        step=step,
+    )
 
 
 def _guardrail_check(
@@ -686,6 +848,7 @@ def _call_studio_tool(
     *,
     workspace: str | None = None,
     studio_base_url: str | None = None,
+    timeout: float = STUDIO_CALLBACK_TIMEOUT_SECONDS,
 ) -> dict[str, Any]:
     body = {
         "jsonrpc": "2.0",
@@ -693,7 +856,7 @@ def _call_studio_tool(
         "method": "tools/call",
         "params": {"name": tool_name, "arguments": arguments},
     }
-    with httpx.Client(timeout=STUDIO_CALLBACK_TIMEOUT_SECONDS) as client:
+    with httpx.Client(timeout=timeout) as client:
         response = client.post(
             _studio_callback_url(session_id, workspace=workspace, studio_base_url=studio_base_url), json=body
         )
@@ -706,7 +869,13 @@ def _request_mutation_approval(
     tool_name: str,
     tool_input: dict[str, Any],
     workspace: str,
+    confirmation_token: str | None = None,
 ) -> dict[str, Any] | str:
+    """Return the approved input for a write, or a string the agent should report instead of running it."""
+    if approval_mode() == APPROVAL_MODE_CHAT:
+        return _terminal_confirmation(tool_name, tool_input, confirmation_token)
+    if confirmation_token is not None:
+        return "Denied: confirmation tokens are only accepted in terminal mode; Studio's approval prompt handles writes"
     if studio_session_id is None:
         return "Denied: mutating operations require a Studio session id and explicit approval"
     try:
@@ -742,19 +911,28 @@ def deploy_guardrail(
         str,
         Field(description="A distinct, policy-compliant end-user request that must remain allowed."),
     ],
-    studio_session_id: str,
+    studio_session_id: str | None = None,
     deployment_run_id: Annotated[
-        str,
+        str | None,
         Field(
             description=(
-                "The Studio-provided id for this user request. Pass the exact value from the Studio context; "
-                "it prevents duplicate deployment attempts."
+                "Studio only: the Studio-provided id for this user request. Pass the exact value from the Studio "
+                "context; it prevents duplicate deployment attempts. Omit in the terminal."
             )
         ),
-    ],
+    ] = None,
     backend_model: str | None = None,
     workspace: str | None = None,
     description: str | None = None,
+    confirmation_token: Annotated[
+        str | None,
+        Field(
+            description=(
+                "Terminal only: the token from a previous confirmation_required result, sent after the user "
+                "confirms that exact deployment."
+            )
+        ),
+    ] = None,
 ) -> str:
     """Create, validate, and deploy one input guardrail with one approval.
 
@@ -763,27 +941,36 @@ def deploy_guardrail(
     and reports the resulting VirtualModel's current routing status without
     blocking the assistant while gateway propagation completes.
     """
-    try:
-        deployment_key = (_validated_session_id(studio_session_id), str(uuid.UUID(deployment_run_id)))
-    except ValueError:
-        return json.dumps(
-            {"status": "failed", "error": "valid studio_session_id and deployment_run_id values are required"}
-        )
-    if deployment_key in _guardrail_deployment_results:
-        previous_result = _guardrail_deployment_results[deployment_key]
-        if previous_result is not None:
-            return previous_result
-        return json.dumps(
-            {
-                "status": "failed",
-                "error": "duplicate guardrail deployment attempt prevented; report the original result and stop",
-            }
-        )
-    _guardrail_deployment_results[deployment_key] = None
+    deployment_key: tuple[str, str] | None = None
+    if approval_mode() == APPROVAL_MODE_STUDIO:
+        try:
+            deployment_key = (
+                _validated_session_id(studio_session_id or ""),
+                str(uuid.UUID(deployment_run_id or "")),
+            )
+        except ValueError:
+            return json.dumps(
+                {"status": "failed", "error": "valid studio_session_id and deployment_run_id values are required"}
+            )
+        with _state_lock:
+            if deployment_key in _guardrail_deployment_results:
+                previous_result = _guardrail_deployment_results[deployment_key]
+                if previous_result is not None:
+                    return previous_result
+                return json.dumps(
+                    {
+                        "status": "failed",
+                        "error": "duplicate guardrail deployment attempt prevented; report the original result and stop",
+                    }
+                )
+            _guardrail_deployment_results[deployment_key] = None
+    else:
+        studio_session_id = None
 
     def finish(payload: dict[str, Any], *, indent: int | None = None) -> str:
         result = json.dumps(payload, indent=indent)
-        _guardrail_deployment_results[deployment_key] = result
+        if deployment_key is not None:
+            _guardrail_deployment_results[deployment_key] = result
         return result
 
     requested_workspace = workspace.strip() if workspace and workspace.strip() else None
@@ -807,6 +994,14 @@ def deploy_guardrail(
 
     selected_backend_model = backend_model.strip() if backend_model and backend_model.strip() else None
     if selected_backend_model is None:
+        if studio_session_id is None:
+            # Only Studio can ask for a model; the terminal must name one.
+            return finish(
+                {
+                    "status": "failed",
+                    "error": "backend_model is required in the terminal; pass '<workspace>/<model>' from nemo models list",
+                }
+            )
         try:
             selection = _call_studio_tool(
                 studio_session_id,
@@ -893,8 +1088,11 @@ def deploy_guardrail(
                 tool_name="deploy_guardrail",
                 tool_input=mutation_input,
                 workspace=requested_workspace,
+                confirmation_token=confirmation_token,
             )
             if isinstance(approved_input, str):
+                if deployment_key is None:
+                    return approved_input
                 return finish({"status": "denied", "error": approved_input})
             if approved_input != mutation_input:
                 return finish(
@@ -1049,8 +1247,13 @@ def nemo_api(
     params: str | dict[str, Any] | None = None,
     studio_session_id: str | None = None,
     workspace: str | None = None,
+    confirmation_token: str | None = None,
 ) -> str:
-    """Call a NeMo Helix API operation; writes require explicit Studio approval.
+    """Call a NeMo Helix API operation; writes require explicit approval.
+
+    In Studio, writes pause for Studio's approval prompt. In the terminal, the first write call returns a
+    ``confirmation_required`` preview with a token; repeat the identical call with that token only after
+    the user confirms.
 
     ``resource`` is a dot-separated API path such as ``workspaces``,
     ``inference.providers``, ``files.filesets``, ``evaluation.metrics``,
@@ -1070,9 +1273,10 @@ def nemo_api(
         parsed_params = _parse_nemo_api_params(params)
         workspace = _normalize_workspace(workspace, parsed_params)
         error_key = _api_error_key(workspace or "", studio_session_id)
-        if is_guardrail_check and _guardrail_check_failures.get(error_key, 0) >= _GUARDRAIL_CHECK_FAILURE_LIMIT:
-            return _record_guardrail_check_failure(
-                error_key,
+        if is_guardrail_check and _guardrail_check_locked_out(error_key):
+            # A refusal is not an executed validation, so it must not restart the cooldown.
+            return _guardrail_check_failure_message(
+                _GUARDRAIL_CHECK_FAILURE_LIMIT,
                 "the validation retry limit was already reached for this request",
             )
         if workspace is None:
@@ -1087,11 +1291,15 @@ def nemo_api(
         if is_guardrail_check:
             _preflight_guardrail_model(client, workspace, parsed_params, error_key)
         if normalized_action not in _READ_ONLY_ACTIONS:
+            # Resolve the effective arguments first: a malformed or alias-conflicting request must fail before a
+            # preview is shown, and the approved fingerprint then covers arguments that resolve one way only.
+            _build_call_kwargs(api_resource.client_cls, method_name, parsed_params, workspace, api_resource.aliases)
             approved_input = _request_mutation_approval(
                 studio_session_id,
                 tool_name="nemo_api",
                 tool_input={"resource": resource, "action": action, "params": params, "workspace": workspace},
                 workspace=workspace,
+                confirmation_token=confirmation_token,
             )
             if isinstance(approved_input, str):
                 return approved_input
@@ -1115,13 +1323,23 @@ def nemo_api(
             method_name = _resolve_api_method(api_resource, resource, normalized_action)
             if is_guardrail_check:
                 _preflight_guardrail_model(client, workspace, parsed_params, error_key)
+        _report_activity(
+            studio_session_id,
+            "nemo_api",
+            f"{normalized_action} {resource.strip()}",
+            workspace=workspace,
+            resource=resource.strip(),
+            action=normalized_action,
+        )
         result = _call_api_method(client, api_resource, method_name, workspace, parsed_params)
         if is_guardrail_check:
             serialized_result = _serialize(result)
             status = serialized_result.get("status") if isinstance(serialized_result, dict) else None
             if status not in {"blocked", "success"}:
                 raise ValueError(f"guardrail check returned unexpected status {status!r}")
-            _guardrail_check_failures.pop(error_key, None)
+            with _state_lock:
+                _guardrail_check_failures.pop(error_key, None)
+                _guardrail_check_failed_at.pop(error_key, None)
         _api_error_streaks.pop(error_key, None)
         return json.dumps(_serialize(result), indent=2, default=str)
     except Exception as exc:
@@ -1276,6 +1494,17 @@ def studio_link(
     return json.dumps(result)
 
 
+def _with_option_objects(question: dict[str, Any]) -> dict[str, Any]:
+    """Studio renders only ``{"label": ...}`` options, so wrap bare string options."""
+    options = question.get("options")
+    if not isinstance(options, list):
+        return question
+    return {
+        **question,
+        "options": [{"label": option} if isinstance(option, str) else option for option in options],
+    }
+
+
 def ask_user_question(studio_session_id: str, questions: str | list[dict[str, Any]]) -> str:
     """Render one or more Studio multiple-choice questions."""
     if isinstance(questions, str):
@@ -1287,6 +1516,7 @@ def ask_user_question(studio_session_id: str, questions: str | list[dict[str, An
         parsed = questions
     if not isinstance(parsed, list) or not parsed or not all(isinstance(question, dict) for question in parsed):
         return "Error: `questions` must be a non-empty JSON array of question objects."
+    parsed = [_with_option_objects(question) for question in parsed]
     approval = _call_studio_tool(
         studio_session_id, "approval_prompt", {"tool_name": "AskUserQuestion", "input": {"questions": parsed}}
     )
@@ -1295,11 +1525,23 @@ def ask_user_question(studio_session_id: str, questions: str | list[dict[str, An
     return json.dumps(approval.get("updatedInput") or {})
 
 
-def check_status(service: str, job_name: str, workspace: str | None = None) -> str:
+def check_status(
+    service: str,
+    job_name: str,
+    workspace: str | None = None,
+    studio_session_id: str | None = None,
+) -> str:
     """Check an evaluation, customization, audit, or Data Designer job."""
     try:
         if workspace is None or not workspace.strip():
             return "Clarification required: which workspace should this status check use?"
+        _report_activity(
+            studio_session_id,
+            "check_status",
+            f"{service} job {job_name}",
+            workspace=workspace.strip(),
+            job_name=job_name,
+        )
         client = _get_client(workspace)
         workspace = workspace.strip()
         if service == "data_designer":
@@ -1321,3 +1563,16 @@ def check_status(service: str, job_name: str, workspace: str | None = None) -> s
         return json.dumps(_serialize(status), indent=2, default=str)
     except Exception as exc:
         return f"Error: {type(exc).__name__}: {exc}"
+
+
+def search_docs(query: str, limit: int = docs_search.DEFAULT_LIMIT, studio_session_id: str | None = None) -> str:
+    """Search the NeMo Helix documentation for how a feature works.
+
+    Use this before explaining a feature, workflow, or concept so the answer
+    matches the documentation. ``query`` is a few keywords, for example
+    ``guardrail virtual model`` or ``add inference provider``. Returns up to
+    ``limit`` sections (at most 10) with the doc path, title, section heading,
+    and a short excerpt. Read-only.
+    """
+    _report_activity(studio_session_id, "search_docs", query.strip(), query=query.strip())
+    return docs_search.search_docs(query, limit)

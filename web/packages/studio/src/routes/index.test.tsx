@@ -253,6 +253,12 @@ describe('Routes', () => {
       expect(findIfRouteExists(routes, ROUTES.workspace.dashboard)).toBe(false);
     });
 
+    it('includes the assistant chat route when assistant studio is in preview', async () => {
+      vi.stubEnv('VITE_FF_ASSISTANT_STUDIO_ENABLED', 'preview');
+      const { routes } = await import('@studio/routes/index');
+      expect(findIfRouteExists(routes, ROUTES.workspace.assistantChat)).toBe(true);
+    });
+
     it('should include virtual model routes if only agent optimizations are enabled', async () => {
       vi.stubEnv('VITE_FF_GUARDRAILS_ENABLED', 'false');
       vi.stubEnv('VITE_FF_AGENT_OPTIMIZATIONS_ENABLED', 'true');

@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 name: guardrails
-description: Create, validate, attach, inspect, update, or remove NeMo Guardrails configurations through the NeMo Helix SDK.
+description: "Create, validate, attach, inspect, update, or remove NeMo Guardrails configurations through the NeMo Helix SDK."
 metadata:
   author: NeMo Helix Team <nemo-helix@nvidia.com>
 ---
@@ -13,6 +13,16 @@ Use this skill for GuardrailConfig CRUD, standalone policy checks, and attaching
 the `nemo-guardrails` middleware to Inference Gateway VirtualModels. Use
 `deploy_guardrail` for the standard input-only deployment path and `nemo_api`
 for other operations; never invoke a CLI or subprocess.
+
+## Explaining guardrails
+
+A guardrail checks messages against a policy, for example "no medical advice"
+or "block jailbreak attempts". In NeMo Helix a GuardrailConfig holds the policy,
+and a VirtualModel applies it in front of a backend model, so every app that
+calls the VirtualModel gets the same protection. When the user asks what
+guardrails are or whether they need one, explain this, check which configs and
+VirtualModels already exist, and link to `guardrails` or `virtual_models`.
+Only start a deployment when the user asks for one.
 
 ## Fast path: deploy a new input-only guardrail
 

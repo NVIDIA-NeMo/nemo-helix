@@ -92,7 +92,12 @@ const getToolSummary = (toolName: string, args: AssistantToolArgs): string | und
     case 'WebFetch':
       return getStringArg(args, ['url']);
     case 'WebSearch':
+    case 'search_docs':
       return getStringArg(args, ['query']);
+    case 'check_status':
+    case 'deploy_guardrail':
+    case 'nemo_api':
+      return getStringArg(args, ['summary']);
     default:
       return getStringArg(args, ['command', 'file_path', 'path', 'pattern', 'query', 'url']);
   }
@@ -123,6 +128,14 @@ const getRepeatedSubtleToolMessage = (toolName: string, count: number): string =
       return `Asked ${count} questions`;
     case 'Bash':
       return `Ran ${count} commands`;
+    case 'check_status':
+      return `Checked ${count} jobs`;
+    case 'deploy_guardrail':
+      return `Ran ${count} guardrail steps`;
+    case 'nemo_api':
+      return `Made ${count} platform API calls`;
+    case 'search_docs':
+      return `Searched docs ${count} times`;
     case 'FindFiles':
       return `Searched files ${count} times`;
     case 'Glob':
@@ -259,6 +272,31 @@ export const getSubtleToolMessage = (
       'Ran',
       getStringArg(args, ['description', 'command']),
       'Ran command'
+    );
+  }
+
+  if (toolName === 'check_status') {
+    return formatSubtleToolMessage('Checked', getToolSummary(toolName, args), 'Checked job status');
+  }
+
+  if (toolName === 'deploy_guardrail') {
+    const failed = getStringArg(args, ['status']) === 'failed';
+    return formatSubtleToolMessage(
+      failed ? 'Guardrail step failed:' : 'Guardrail:',
+      getToolSummary(toolName, args),
+      failed ? 'Guardrail step failed' : 'Deployed guardrail'
+    );
+  }
+
+  if (toolName === 'nemo_api') {
+    return formatSubtleToolMessage('Called', getToolSummary(toolName, args), 'Called platform API');
+  }
+
+  if (toolName === 'search_docs') {
+    return formatSubtleToolMessage(
+      'Searched docs for',
+      getToolSummary(toolName, args),
+      'Searched docs'
     );
   }
 

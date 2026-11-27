@@ -3,6 +3,7 @@
 
 import asyncio
 import json
+import types
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -15,7 +16,7 @@ from nemo_agents_plugin.agent_config import load_agent_config
 from nemo_agents_plugin.fabric.translator import translate_agent_config
 from nemo_fabric_adapter_contract.models import AgentMcpServerConfig
 from nemo_helix_plugin.client.client import NemoClient
-from nemo_studio_assistant import register
+from nemo_studio_assistant import register, topic_gate
 from nemo_studio_assistant.fabric_compat import (
     apply_deepagents_mcp_env_compatibility,
 )
@@ -70,10 +71,13 @@ EVAL_CASES = _load_eval_cases()
 
 @pytest.fixture(autouse=True)
 def _reset_api_error_streaks(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv(register.APPROVAL_MODE_ENV, raising=False)
     monkeypatch.setattr(register, "_api_error_streaks", {})
     monkeypatch.setattr(register, "_guardrail_check_failures", {})
+    monkeypatch.setattr(register, "_guardrail_check_failed_at", {})
     monkeypatch.setattr(register, "_preflighted_guardrail_models", set())
     monkeypatch.setattr(register, "_guardrail_deployment_results", {})
+    monkeypatch.setattr(register, "_pending_confirmations", {})
     monkeypatch.setattr(register, "_preflight_guardrail_model", lambda *_args, **_kwargs: None)
 
 
@@ -100,6 +104,7 @@ def test_agent_config_translates_to_fabric_deepagents() -> None:
     assert translated.mcp.servers["nemo_studio"].env == {
         "NHX_BASE_URL": "http://host.docker.internal:8080",
         "NHX_WORKSPACE": "default",
+        "ASSISTANT_APPROVAL_MODE": "studio",
     }
     assert translated.skills is not None
     assert translated.skills.paths == SKILL_PATHS
@@ -169,7 +174,7 @@ def test_deepagents_runtime_can_load_packaged_skill_library() -> None:
     assert error is None
     assert {skill["name"] for skill in skills} == {
         "garak",
-        "benchmark-execution",
+        "studio-guide",
         "entities",
         "evals",
         "files",
@@ -214,7 +219,7 @@ def test_fabric_resolves_packaged_skills_outside_private_workspace(tmp_path: Pat
     assert error is None
     assert {skill["name"] for skill in skills} == {
         "garak",
-        "benchmark-execution",
+        "studio-guide",
         "entities",
         "evals",
         "files",
@@ -254,14 +259,20 @@ def test_fabric_image_loads_startup_compatibility_shims() -> None:
     assert (AGENT_ROOT / "sitecustomize.py").is_file()
 
 
-def test_guardrails_skill_is_generic_sdk_workflow_and_copies_match() -> None:
-    source = AGENT_ROOT / "src/nemo_studio_assistant/skills/guardrails/SKILL.md"
-    packaged = AGENT_ROOT / "skills/guardrails/SKILL.md"
-    registered = ETHOS_ROOT / "skills/guardrails/SKILL.md"
-    skill_text = source.read_text(encoding="utf-8")
+def test_registration_skills_mirror_packaged_skills() -> None:
+    packaged_root = AGENT_ROOT / "skills"
+    registered_root = ETHOS_ROOT / "skills"
+    packaged = {path.relative_to(packaged_root): path for path in packaged_root.rglob("*") if path.is_file()}
+    registered = {path.relative_to(registered_root): path for path in registered_root.rglob("*") if path.is_file()}
 
-    assert packaged.read_text(encoding="utf-8") == skill_text
-    assert registered.read_text(encoding="utf-8") == skill_text
+    assert sorted(registered) == sorted(packaged)
+    for relative_path, packaged_path in packaged.items():
+        assert registered[relative_path].read_bytes() == packaged_path.read_bytes(), relative_path
+
+
+def test_guardrails_skill_is_generic_sdk_workflow() -> None:
+    skill_text = (AGENT_ROOT / "skills/guardrails/SKILL.md").read_text(encoding="utf-8")
+
     assert "guardrail.configs" in skill_text
     assert "| List/read backend models | `models` | `list` / `retrieve` |" in skill_text
     assert "inference.virtual_models" in skill_text
@@ -287,11 +298,68 @@ def test_mcp_server_exposes_expected_tools() -> None:
         "job_progress",
         "studio_link",
         "ask_user_question",
+        "search_docs",
     }
     deploy_tool = next(tool for tool in tools if tool.name == "deploy_guardrail")
     blocked_schema = deploy_tool.parameters["properties"]["blocked_message"]
     assert "actual end-user request" in blocked_schema["description"]
     assert "Never pass predicted refusal text" in blocked_schema["description"]
+
+
+# The terminal clause may say Studio pages do not exist there; Studio-only tool and argument names must not appear.
+SURFACE_SPECIFIC_TERMS = ("studio_session_id", "deployment_run_id", "studio_link", "select_")
+
+
+def test_terminal_agent_config_differs_from_studio_only_in_approval_mode() -> None:
+    studio_lines = (AGENT_ROOT / "agent.yaml").read_text().splitlines()
+    terminal_lines = (AGENT_ROOT / "agent.terminal.yaml").read_text().splitlines()
+
+    assert len(studio_lines) == len(terminal_lines)
+    changed = [(old.strip(), new.strip()) for old, new in zip(studio_lines, terminal_lines) if old != new]
+    assert sorted(changed) == sorted(
+        [
+            (
+                "# studio: writes pause for Studio's approval card. The terminal deployment sets chat.",
+                "# terminal: writes need the confirmation_token from a confirmation_required preview.",
+            ),
+            ("ASSISTANT_APPROVAL_MODE: studio", "ASSISTANT_APPROVAL_MODE: chat"),
+            ("model: ${NEMO_DEFAULT_MODEL}", "model: ${NEMO_TERMINAL_MODEL}"),
+        ]
+    )
+    translated = translate_agent_config(load_agent_config(AGENT_ROOT / "agent.terminal.yaml"))
+    assert translated.mcp is not None
+    assert translated.mcp.servers["nemo_studio"].env["ASSISTANT_APPROVAL_MODE"] == "chat"
+
+
+def test_terminal_agent_model_is_the_topic_gate_variable_not_the_raw_backend() -> None:
+    # Registering agent.terminal.yaml without deploy-local.sh leaves NEMO_TERMINAL_MODEL unset, so the
+    # agent cannot be invoked ungated. The raw backend is only ever named by NEMO_DEFAULT_MODEL.
+    config = load_agent_config(AGENT_ROOT / "agent.terminal.yaml")
+    assert config.models["default"].model == "${NEMO_TERMINAL_MODEL}"
+
+
+def test_shared_system_prompt_names_no_studio_only_surface() -> None:
+    config = load_agent_config(AGENT_ROOT / "agent.yaml")
+    assert config.instructions is not None
+    assert config.instructions.system is not None
+    prompt = config.instructions.system.content
+
+    assert [term for term in SURFACE_SPECIFIC_TERMS if term in prompt] == []
+
+
+READ_ONLY_BUILTIN_TOOLS = {"ls", "read_file", "glob", "grep"}
+WRITING_OR_SHELL_BUILTIN_TOOLS = {"write_file", "edit_file", "execute", "task", "write_todos", "delete"}
+
+
+def test_tool_allowlist_is_the_mcp_tools_plus_read_only_builtins() -> None:
+    config = load_agent_config(AGENT_ROOT / "agent.yaml")
+    assert config.tools is not None
+    assert config.tools.enabled is not None
+    enabled = set(config.tools.enabled)
+    mcp_tool_names = {tool.name for tool in asyncio.run(create_server().list_tools())}
+
+    assert enabled == mcp_tool_names | READ_ONLY_BUILTIN_TOOLS
+    assert not enabled & WRITING_OR_SHELL_BUILTIN_TOOLS
 
 
 _TIMESTAMP = "2026-01-01T00:00:00Z"
@@ -363,8 +431,10 @@ def _ok_helix(method: str, path: str, payload: Any = None, status: int = 200) ->
     return _FakeHelix({(method, path): _json_route(payload if payload is not None else {}, status)})
 
 
-def _guardrail_workflow_client(check_statuses: list[str]) -> tuple[NemoClient, dict[str, Any]]:
-    state: dict[str, Any] = {"configs": {}, "virtual_models": {}, "checks": []}
+def _guardrail_workflow_client(
+    check_statuses: list[str], config_name: str = "no-fruit", virtual_model_name: str = "guarded-model"
+) -> tuple[NemoClient, dict[str, Any]]:
+    state: dict[str, Any] = {"configs": {}, "virtual_models": {}, "checks": [], "created": []}
     statuses = iter(check_statuses)
 
     def get_config(request: httpx.Request) -> httpx.Response:
@@ -373,6 +443,7 @@ def _guardrail_workflow_client(check_statuses: list[str]) -> tuple[NemoClient, d
 
     def create_config(request: httpx.Request) -> httpx.Response:
         body = json.loads(request.content)
+        state["created"].append(("config", body["name"]))
         state["configs"][body["name"]] = {**_entity(body["name"]), **body, "data": body.get("data") or {}}
         return httpx.Response(201, json=state["configs"][body["name"]])
 
@@ -384,6 +455,7 @@ def _guardrail_workflow_client(check_statuses: list[str]) -> tuple[NemoClient, d
 
     def create_virtual_model(request: httpx.Request) -> httpx.Response:
         body = json.loads(request.content)
+        state["created"].append(("virtual_model", body["name"]))
         state["virtual_models"][body["name"]] = {**_entity(body["name"]), **body}
         return httpx.Response(201, json=state["virtual_models"][body["name"]])
 
@@ -398,8 +470,8 @@ def _guardrail_workflow_client(check_statuses: list[str]) -> tuple[NemoClient, d
     platform.routes = {
         ("POST", f"{_GUARDRAILS}/checks"): check,
         ("POST", f"{_GUARDRAILS}/configs"): create_config,
-        ("GET", f"{_GUARDRAILS}/configs/no-fruit"): get_config,
-        ("GET", f"{_INFERENCE_GATEWAY}/virtual-models/guarded-model"): get_virtual_model,
+        ("GET", f"{_GUARDRAILS}/configs/{config_name}"): get_config,
+        ("GET", f"{_INFERENCE_GATEWAY}/virtual-models/{virtual_model_name}"): get_virtual_model,
         ("POST", f"{_INFERENCE_GATEWAY}/virtual-models"): create_virtual_model,
         ("GET", f"{_INFERENCE_GATEWAY}/openai/-/v1/models"): list_models,
     }
@@ -890,9 +962,9 @@ def test_invalid_guardrail_config_action_returns_exact_path_before_approval(
 ) -> None:
     approval_requested = False
 
-    def approve(*_args: object, **_kwargs: object) -> dict[str, str]:
+    def approve(_session: str, tool_name: str, *_args: object, **_kwargs: object) -> dict[str, str]:
         nonlocal approval_requested
-        approval_requested = True
+        approval_requested = approval_requested or tool_name == "approval_prompt"
         return {"behavior": "allow"}
 
     platform = _FakeHelix()
@@ -1116,7 +1188,8 @@ def test_mutating_nemo_api_uses_studio_approval(monkeypatch: pytest.MonkeyPatch)
     approvals: list[tuple[str, str, dict[str, object], dict[str, object]]] = []
 
     def approve(session: str, tool_name: str, arguments: dict[str, object], **kwargs: object) -> dict[str, str]:
-        approvals.append((session, tool_name, arguments, kwargs))
+        if tool_name != "assistant_activity":
+            approvals.append((session, tool_name, arguments, kwargs))
         return {"behavior": "allow"}
 
     platform = _ok_helix("POST", _WORKSPACES, _workspace("demo"), status=201)
@@ -1442,3 +1515,413 @@ def test_ask_user_question_accepts_structured_model_input(monkeypatch: pytest.Mo
 
     assert json.loads(response) == {"workspace": "default"}
     assert callback_input == {"tool_name": "AskUserQuestion", "input": {"questions": questions}}
+
+
+def test_ask_user_question_wraps_string_options(monkeypatch: pytest.MonkeyPatch) -> None:
+    callback_input: dict[str, object] = {}
+
+    def callback(_session_id: str, _tool_name: str, arguments: dict[str, object]) -> dict[str, object]:
+        callback_input.update(arguments)
+        return {"behavior": "allow", "updatedInput": {}}
+
+    monkeypatch.setattr(register, "_call_studio_tool", callback)
+
+    register.ask_user_question(
+        "90a877d5-19f6-49a8-bf09-d0020ae0833a",
+        [{"question": "Continue?", "options": ["Yes", {"label": "No", "description": "Stop here"}]}],
+    )
+
+    assert callback_input["input"] == {
+        "questions": [
+            {"question": "Continue?", "options": [{"label": "Yes"}, {"label": "No", "description": "Stop here"}]}
+        ]
+    }
+
+
+def test_nemo_api_reports_activity_to_studio(monkeypatch: pytest.MonkeyPatch) -> None:
+    session_id = "90a877d5-19f6-49a8-bf09-d0020ae0833a"
+    calls: list[tuple[str, dict[str, object], dict[str, object]]] = []
+
+    def record(_session: str, tool_name: str, arguments: dict[str, object], **kwargs: object) -> dict[str, str]:
+        calls.append((tool_name, arguments, kwargs))
+        return {"status": "recorded"}
+
+    platform = _ok_helix("GET", _WORKSPACES, {"data": [_workspace("default")], "pagination": _PAGINATION})
+    _install_client(monkeypatch, platform.client())
+    monkeypatch.setattr(register, "_call_studio_tool", record)
+
+    register.nemo_api("workspaces", "list", studio_session_id=session_id, workspace="default")
+
+    assert calls == [
+        (
+            "assistant_activity",
+            {"tool_name": "nemo_api", "summary": "list workspaces", "resource": "workspaces", "action": "list"},
+            {"workspace": "default", "timeout": register.STUDIO_ACTIVITY_TIMEOUT_SECONDS},
+        )
+    ]
+
+
+@pytest.mark.parametrize(
+    ("resource", "action"),
+    [("workspaces", "create"), ("workspaces", "explode"), ("not-a-resource", "list")],
+)
+def test_nemo_api_reports_no_activity_for_denied_or_invalid_calls(
+    monkeypatch: pytest.MonkeyPatch, resource: str, action: str
+) -> None:
+    activity: list[dict[str, object]] = []
+
+    def record(_session: str, tool_name: str, arguments: dict[str, object], **_kwargs: object) -> dict[str, str]:
+        if tool_name == "assistant_activity":
+            activity.append(arguments)
+        return {"behavior": "deny", "message": "declined"}
+
+    platform = _ok_helix("GET", _WORKSPACES, {"data": [_workspace("default")], "pagination": _PAGINATION})
+    _install_client(monkeypatch, platform.client())
+    monkeypatch.setattr(register, "_call_studio_tool", record)
+
+    register.nemo_api(resource, action, studio_session_id="90a877d5-19f6-49a8-bf09-d0020ae0833a", workspace="default")
+
+    assert activity == []
+
+
+def test_activity_failure_does_not_change_tool_result(monkeypatch: pytest.MonkeyPatch) -> None:
+    attempts: list[str] = []
+    expected = json.dumps({"status": "ok", "results": [{"path": "guardrails.mdx", "title": "Guardrails"}]})
+
+    def fail(_session: str, tool_name: str, *_args: object, **_kwargs: object) -> dict[str, str]:
+        attempts.append(tool_name)
+        raise RuntimeError("Studio is down")
+
+    monkeypatch.setattr(register.docs_search, "search_docs", lambda _query, _limit: expected)
+    monkeypatch.setattr(register, "_call_studio_tool", fail)
+
+    result = register.search_docs("guardrail", studio_session_id="90a877d5-19f6-49a8-bf09-d0020ae0833a")
+
+    assert attempts == ["assistant_activity"]
+    assert result == expected
+
+
+_CREATE_DEMO_WORKSPACE = ("workspaces", "create", '{"name": "demo"}')
+
+
+@pytest.fixture
+def terminal_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(register.APPROVAL_MODE_ENV, register.APPROVAL_MODE_CHAT)
+
+
+def _preview(response: str) -> dict[str, Any]:
+    payload = json.loads(response)
+    assert payload["status"] == "confirmation_required", payload
+    return payload
+
+
+def test_studio_mode_refuses_confirmation_tokens(monkeypatch: pytest.MonkeyPatch) -> None:
+    platform = _ok_helix("POST", _WORKSPACES, _workspace("demo"), status=201)
+    _install_client(monkeypatch, platform.client())
+
+    def fail(*_args: object, **_kwargs: object) -> dict[str, str]:
+        raise AssertionError("a token-only call must not reach Studio")
+
+    monkeypatch.setattr(register, "_call_studio_tool", fail)
+
+    response = register.nemo_api(
+        *_CREATE_DEMO_WORKSPACE,
+        studio_session_id="90a877d5-19f6-49a8-bf09-d0020ae0833a",
+        workspace="default",
+        confirmation_token="forged",
+    )
+
+    assert "only accepted in terminal mode" in response
+    assert platform.mutations() == []
+
+
+def test_terminal_write_previews_then_runs_once_confirmed(monkeypatch: pytest.MonkeyPatch, terminal_mode: None) -> None:
+    platform = _ok_helix("POST", _WORKSPACES, _workspace("demo"), status=201)
+    _install_client(monkeypatch, platform.client())
+
+    preview = _preview(register.nemo_api(*_CREATE_DEMO_WORKSPACE, workspace="default"))
+
+    assert "create workspaces in workspace default" in preview["summary"]
+    assert platform.mutations() == []
+
+    response = json.loads(
+        register.nemo_api(
+            *_CREATE_DEMO_WORKSPACE, workspace="default", confirmation_token=preview["confirmation_token"]
+        )
+    )
+
+    assert response["name"] == "demo"
+    assert json.loads(platform.mutations()[0].content) == {"name": "demo"}
+
+
+def test_terminal_confirmation_token_is_single_use(monkeypatch: pytest.MonkeyPatch, terminal_mode: None) -> None:
+    platform = _ok_helix("POST", _WORKSPACES, _workspace("demo"), status=201)
+    _install_client(monkeypatch, platform.client())
+    token = _preview(register.nemo_api(*_CREATE_DEMO_WORKSPACE, workspace="default"))["confirmation_token"]
+    register.nemo_api(*_CREATE_DEMO_WORKSPACE, workspace="default", confirmation_token=token)
+
+    replay = json.loads(register.nemo_api(*_CREATE_DEMO_WORKSPACE, workspace="default", confirmation_token=token))
+
+    assert replay["status"] == "confirmation_rejected"
+    assert len(platform.mutations()) == 1
+
+
+def test_terminal_confirmation_rejects_a_changed_operation_and_consumes_the_token(
+    monkeypatch: pytest.MonkeyPatch, terminal_mode: None
+) -> None:
+    platform = _ok_helix("POST", _WORKSPACES, _workspace("demo"), status=201)
+    _install_client(monkeypatch, platform.client())
+    token = _preview(register.nemo_api(*_CREATE_DEMO_WORKSPACE, workspace="default"))["confirmation_token"]
+
+    changed = json.loads(
+        register.nemo_api("workspaces", "create", '{"name": "other"}', workspace="default", confirmation_token=token)
+    )
+    retry = json.loads(register.nemo_api(*_CREATE_DEMO_WORKSPACE, workspace="default", confirmation_token=token))
+
+    assert changed["status"] == "confirmation_rejected"
+    assert "different operation" in changed["error"]
+    assert retry["status"] == "confirmation_rejected"
+    assert platform.mutations() == []
+
+
+def test_terminal_confirmation_expires(monkeypatch: pytest.MonkeyPatch, terminal_mode: None) -> None:
+    platform = _ok_helix("POST", _WORKSPACES, _workspace("demo"), status=201)
+    _install_client(monkeypatch, platform.client())
+    monkeypatch.setattr(register, "CONFIRMATION_TTL_SECONDS", 0.0)
+    token = _preview(register.nemo_api(*_CREATE_DEMO_WORKSPACE, workspace="default"))["confirmation_token"]
+
+    response = json.loads(register.nemo_api(*_CREATE_DEMO_WORKSPACE, workspace="default", confirmation_token=token))
+
+    assert response["status"] == "confirmation_rejected"
+    assert platform.mutations() == []
+
+
+@pytest.mark.parametrize(
+    "params",
+    [
+        {"fileset": "a", "name": "b", "remote_path": "x.txt"},
+        {"name": "b", "fileset": "a", "remote_path": "x.txt"},
+    ],
+)
+def test_terminal_write_rejects_conflicting_aliases_before_a_preview(
+    monkeypatch: pytest.MonkeyPatch, terminal_mode: None, params: dict[str, str]
+) -> None:
+    platform = _FakeHelix()
+    _install_client(monkeypatch, platform.client())
+
+    response = register.nemo_api("files", "delete", json.dumps(params), workspace="default")
+
+    assert "confirmation_token" not in response
+    assert "conflicting values" in response
+    assert platform.mutations() == []
+
+
+def test_terminal_confirmation_reads_the_clock_while_holding_the_lock(
+    monkeypatch: pytest.MonkeyPatch, terminal_mode: None
+) -> None:
+    lock_held_at_read: list[bool] = []
+
+    class Clock:
+        @staticmethod
+        def monotonic() -> float:
+            lock_held_at_read.append(register._state_lock.locked())
+            return 0.0
+
+    monkeypatch.setattr(register, "time", Clock)
+    platform = _ok_helix("POST", _WORKSPACES, _workspace("demo"), status=201)
+    _install_client(monkeypatch, platform.client())
+
+    register.nemo_api(*_CREATE_DEMO_WORKSPACE, workspace="default")
+
+    assert lock_held_at_read
+    assert all(lock_held_at_read)
+
+
+def test_terminal_reads_run_without_a_preview(monkeypatch: pytest.MonkeyPatch, terminal_mode: None) -> None:
+    platform = _ok_helix("GET", f"{_WORKSPACES}/default", _workspace("default"))
+    _install_client(monkeypatch, platform.client())
+
+    response = json.loads(register.nemo_api("workspaces", "retrieve", '{"name": "default"}', workspace="default"))
+
+    assert response["name"] == "default"
+
+
+def test_terminal_mode_registers_only_terminal_tools(terminal_mode: None) -> None:
+    tools = asyncio.run(create_server().list_tools())
+
+    assert {tool.name for tool in tools} == {"deploy_guardrail", "nemo_api", "check_status", "search_docs"}
+
+
+def test_unknown_approval_mode_fails_loudly(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(register.APPROVAL_MODE_ENV, "yolo")
+
+    with pytest.raises(RuntimeError, match="ASSISTANT_APPROVAL_MODE"):
+        create_server()
+
+
+@pytest.mark.parametrize("params", ['{"name": "demo"}', '{"name":"demo"}', '  {"name": "demo"}  '])
+def test_operation_fingerprint_ignores_json_spacing(params: str) -> None:
+    base = {"resource": "workspaces", "action": "create", "params": '{"name": "demo"}', "workspace": "default"}
+
+    assert register._operation_fingerprint("nemo_api", {**base, "params": params}) == (
+        register._operation_fingerprint("nemo_api", base)
+    )
+
+
+def test_terminal_deploy_guardrail_requires_an_explicit_backend_model(
+    monkeypatch: pytest.MonkeyPatch, terminal_mode: None
+) -> None:
+    client, state = _guardrail_workflow_client(["blocked", "success"])
+    _install_client(monkeypatch, client)
+
+    response = json.loads(
+        register.deploy_guardrail(
+            policy="Do not discuss fruit.",
+            config_name="no-fruit",
+            virtual_model_name="guarded-model",
+            blocked_message="Tell me about bananas.",
+            allowed_message="Tell me about the moon.",
+            workspace="default",
+        )
+    )
+
+    assert response["status"] == "failed"
+    assert "backend_model is required" in response["error"]
+    assert state["configs"] == {}
+
+
+def test_terminal_deploy_guardrail_writes_only_after_confirmation(
+    monkeypatch: pytest.MonkeyPatch, terminal_mode: None
+) -> None:
+    client, state = _guardrail_workflow_client(["blocked", "success"])
+    _install_client(monkeypatch, client)
+    arguments = {
+        "policy": "Do not discuss fruit.",
+        "config_name": "no-fruit",
+        "backend_model": "default/model-a",
+        "virtual_model_name": "guarded-model",
+        "blocked_message": "Tell me about bananas.",
+        "allowed_message": "Tell me about the moon.",
+        "workspace": "default",
+    }
+
+    preview = _preview(register.deploy_guardrail(**arguments))
+
+    assert "Create guardrail config default/no-fruit" in preview["summary"]
+    assert state["configs"] == {}
+    assert state["virtual_models"] == {}
+    assert state["checks"] == []
+
+    response = json.loads(register.deploy_guardrail(**arguments, confirmation_token=preview["confirmation_token"]))
+
+    assert response["status"] == "success"
+    assert set(state["configs"]) == {"no-fruit"}
+    assert set(state["virtual_models"]) == {"guarded-model"}
+
+
+def test_topic_gate_is_created_once_and_reused(monkeypatch: pytest.MonkeyPatch, terminal_mode: None) -> None:
+    client, state = _guardrail_workflow_client(
+        ["blocked", "success", "blocked", "success"],
+        config_name=topic_gate.TOPIC_GATE_NAME,
+        virtual_model_name=topic_gate.TOPIC_GATE_NAME,
+    )
+    _install_client(monkeypatch, client)
+
+    first = topic_gate.ensure_topic_gate("default", "default/model-a")
+    assert first == f"default/{topic_gate.TOPIC_GATE_NAME}"
+    assert set(state["configs"]) == {topic_gate.TOPIC_GATE_NAME}
+    assert set(state["virtual_models"]) == {topic_gate.TOPIC_GATE_NAME}
+
+    second = topic_gate.ensure_topic_gate("default", "default/model-a")
+    assert second == first
+    assert set(state["configs"]) == {topic_gate.TOPIC_GATE_NAME}
+    # The second call reuses the gate: one create per resource across both calls.
+    assert state["created"] == [("config", topic_gate.TOPIC_GATE_NAME), ("virtual_model", topic_gate.TOPIC_GATE_NAME)]
+
+
+def test_topic_gate_conflict_error_says_how_to_recover(monkeypatch: pytest.MonkeyPatch, terminal_mode: None) -> None:
+    conflict = {
+        "status": "failed",
+        "error": "VirtualModel default/nemo-assistant-topic-gate already exists with different data",
+    }
+    monkeypatch.setattr(register, "deploy_guardrail", lambda **_kwargs: json.dumps(conflict))
+
+    with pytest.raises(RuntimeError, match="(?i)remove that guardrail config and virtual model"):
+        topic_gate.ensure_topic_gate("default", "default/model-b")
+
+
+def test_guardrail_check_lockout_expires_after_the_cooldown(monkeypatch: pytest.MonkeyPatch) -> None:
+    key = "workspace:default"
+    monkeypatch.setattr(register, "_guardrail_check_failures", {key: register._GUARDRAIL_CHECK_FAILURE_LIMIT})
+    monkeypatch.setattr(register, "_guardrail_check_failed_at", {key: 100.0})
+    clock = {"now": 100.0 + register._GUARDRAIL_CHECK_COOLDOWN_SECONDS - 1}
+    monkeypatch.setattr(register, "time", types.SimpleNamespace(monotonic=lambda: clock["now"]))
+
+    assert register._guardrail_check_locked_out(key) is True
+
+    clock["now"] = 100.0 + register._GUARDRAIL_CHECK_COOLDOWN_SECONDS + 1
+    assert register._guardrail_check_locked_out(key) is False
+    assert key not in register._guardrail_check_failures
+    assert key not in register._guardrail_check_failed_at
+
+
+def test_guardrail_check_lockout_refusal_does_not_renew_the_cooldown(monkeypatch: pytest.MonkeyPatch) -> None:
+    key = "workspace:default"
+    monkeypatch.setattr(register, "_guardrail_check_failures", {key: register._GUARDRAIL_CHECK_FAILURE_LIMIT})
+    monkeypatch.setattr(register, "_guardrail_check_failed_at", {key: 100.0})
+    monkeypatch.setattr(register, "time", types.SimpleNamespace(monotonic=lambda: 150.0))
+    monkeypatch.setattr(
+        register, "_get_client", lambda *_args, **_kwargs: pytest.fail("a locked-out check must not run")
+    )
+
+    response = register.nemo_api("guardrail", "check", '{"model": "default/m"}', workspace="default")
+
+    assert "retry limit" in response
+    assert register._guardrail_check_failed_at[key] == 100.0
+
+
+def test_topic_gate_waits_for_the_gateway_to_route_the_gate(monkeypatch: pytest.MonkeyPatch) -> None:
+    answers = iter([False, False, True])
+    sleeps: list[float] = []
+    monkeypatch.setattr(register, "_get_client", lambda *_args, **_kwargs: object())
+    monkeypatch.setattr(register, "_routable_virtual_model", lambda *_args: next(answers))
+    monkeypatch.setattr(topic_gate, "time", types.SimpleNamespace(monotonic=lambda: 0.0, sleep=sleeps.append))
+
+    topic_gate._wait_until_routable("default")
+
+    assert sleeps == [topic_gate.ROUTABLE_POLL_SECONDS] * 2
+
+
+def test_topic_gate_fails_when_the_gate_never_becomes_routable(monkeypatch: pytest.MonkeyPatch) -> None:
+    clock = {"now": 0.0}
+    monkeypatch.setattr(register, "_get_client", lambda *_args, **_kwargs: object())
+    monkeypatch.setattr(register, "_routable_virtual_model", lambda *_args: False)
+    fake_time = types.SimpleNamespace(
+        monotonic=lambda: clock["now"], sleep=lambda seconds: clock.update(now=clock["now"] + seconds)
+    )
+    monkeypatch.setattr(topic_gate, "time", fake_time)
+
+    with pytest.raises(RuntimeError, match="not routable"):
+        topic_gate._wait_until_routable("default")
+
+
+def test_topic_gate_refuses_to_run_outside_terminal_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(register.APPROVAL_MODE_ENV, register.APPROVAL_MODE_STUDIO)
+
+    with pytest.raises(RuntimeError, match="requires"):
+        topic_gate.ensure_topic_gate("default", "default/model-a")
+
+
+def test_activity_is_skipped_without_session(monkeypatch: pytest.MonkeyPatch) -> None:
+    # _report_activity swallows exceptions, so record calls instead of raising inside the callback.
+    calls: list[tuple[object, ...]] = []
+
+    def record(*args: object, **_kwargs: object) -> dict[str, str]:
+        calls.append(args)
+        return {}
+
+    monkeypatch.setattr(register, "_call_studio_tool", record)
+
+    register.search_docs("guardrail")
+
+    assert calls == []

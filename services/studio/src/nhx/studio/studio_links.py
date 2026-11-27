@@ -3,11 +3,12 @@
 
 """Studio link destinations and MCP tool helpers for the assistant bridge."""
 
+import re
 from collections.abc import Mapping
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import parse_qsl, quote, unquote, urlsplit
 
 from nhx.studio.config import StudioConfig
 from nhx.studio.env_mappings import ENV_MAPPINGS
@@ -15,7 +16,7 @@ from nhx.studio.env_mappings import ENV_MAPPINGS
 
 @dataclass(frozen=True)
 class StudioLinkDestination:
-    """Known Studio destination that Claude Code can link to."""
+    """Known Studio destination that the assistant can link to."""
 
     label: str
     path_template: str
@@ -500,6 +501,147 @@ def enabled_destinations(feature_flags: Mapping[str, bool]) -> dict[str, StudioL
         for destination, config in STUDIO_LINK_DESTINATIONS.items()
         if _destination_enabled(destination, feature_flags)
     }
+
+
+_PLACEHOLDER_RE = re.compile(r"\{(\w+)\}")
+_MAX_PAGE_SELECTIONS = 5
+# Page context reaches the trusted system prompt, so URL-supplied values must
+# look like identifiers rather than free text that could carry instructions.
+_PAGE_KEY_RE = re.compile(r"[A-Za-z][A-Za-z0-9_]{0,31}")
+_PAGE_VALUE_RE = re.compile(r"[A-Za-z0-9][\w.:@/~+-]{0,119}")
+
+
+@dataclass(frozen=True)
+class StudioPage:
+    """The Studio destination a route path corresponds to."""
+
+    destination: str
+    label: str
+    args: dict[str, str] = field(default_factory=dict)
+    selections: dict[str, str] = field(default_factory=dict)
+
+
+def _page_value(value: str) -> str | None:
+    return value if _PAGE_VALUE_RE.fullmatch(value) else None
+
+
+def _path_pattern(path_template: str) -> re.Pattern[str]:
+    parts: list[str] = []
+    position = 0
+    for match in _PLACEHOLDER_RE.finditer(path_template):
+        parts.append(re.escape(path_template[position : match.start()]))
+        parts.append(f"(?P<{match.group(1)}>[^/]+)")
+        position = match.end()
+    parts.append(re.escape(path_template[position:]))
+    return re.compile("".join(parts) + "/?")
+
+
+def _match_query(template_query: str, query: Mapping[str, str]) -> dict[str, str] | None:
+    captured: dict[str, str] = {}
+    for key, expected in parse_qsl(template_query, keep_blank_values=True):
+        actual = query.get(key)
+        if actual is None:
+            return None
+        placeholder = _PLACEHOLDER_RE.fullmatch(expected)
+        if placeholder:
+            captured[placeholder.group(1)] = actual
+        elif actual != expected:
+            return None
+    return captured
+
+
+@dataclass(frozen=True)
+class _RouteMatch:
+    destination: str
+    path_template: str
+    raw_args: dict[str, str]
+    query: dict[str, str]
+    consumed: set[str]
+
+
+def _match_route(route: str | None) -> _RouteMatch | None:
+    """Match a Studio route to its most specific destination; ``None`` for unknown or malformed routes."""
+    if not route:
+        return None
+    try:
+        parsed = urlsplit(route)
+    except ValueError:
+        # A malformed optional URL is an unknown page, not a failed prompt.
+        return None
+    marker_index = parsed.path.find("/workspaces/")
+    if marker_index < 0:
+        return None
+    path = parsed.path[marker_index:]
+    query = dict(parse_qsl(parsed.query, keep_blank_values=True))
+
+    best: tuple[tuple[int, int], _RouteMatch] | None = None
+    for destination, config in STUDIO_LINK_DESTINATIONS.items():
+        path_template, _, template_query = config.path_template.partition("?")
+        path_match = _path_pattern(path_template).fullmatch(path)
+        if path_match is None:
+            continue
+        query_args = _match_query(template_query, query)
+        if query_args is None:
+            continue
+        consumed = {key for key, _ in parse_qsl(template_query, keep_blank_values=True)}
+        literal_length = len(_PLACEHOLDER_RE.sub("", path_template))
+        # Static path specificity first; query keys only break ties between matches for the same path.
+        score = (literal_length, len(consumed))
+        if best is None or score > best[0]:
+            args = {key: unquote(value) for key, value in path_match.groupdict().items()}
+            best = (
+                score,
+                _RouteMatch(destination, path_template, {**args, **query_args}, query, consumed),
+            )
+    return None if best is None else best[1]
+
+
+def studio_route_template(route: str | None) -> str | None:
+    """Return the matched destination's route template, such as ``/workspaces/{workspace}/agents/{name}``.
+
+    Callers that show a route to the agent use this instead of the raw path, so
+    percent-encoded free text in a URL never reaches the prompt.
+    """
+    match = _match_route(route)
+    return None if match is None else match.path_template
+
+
+def describe_studio_page(route: str | None, workspace: str | None = None) -> StudioPage | None:
+    """Return the known Studio destination for a route path, if any.
+
+    ``route`` is a path with an optional query string. Anything before
+    ``/workspaces/`` (such as a ``/studio`` base path) is ignored. The most
+    specific matching destination wins; query parameters it does not consume are
+    returned as ``selections``. Values that are not identifier-like are dropped.
+    When ``workspace`` is given, a route in a different workspace describes no page,
+    so resource context from another workspace never reaches the prompt.
+    """
+    match = _match_route(route)
+    if match is None:
+        return None
+    if workspace is not None and match.raw_args.get("workspace") != workspace:
+        return None
+
+    destination, raw_args, query, consumed = match.destination, match.raw_args, match.query, match.consumed
+    args = {
+        key: clean_value
+        for key, value in raw_args.items()
+        if key != "workspace" and (clean_value := _page_value(value)) is not None
+    }
+    label_args = {
+        placeholder: args.get(placeholder, "")
+        for placeholder in _PLACEHOLDER_RE.findall(STUDIO_LINK_DESTINATIONS[destination].label)
+    }
+    label = STUDIO_LINK_DESTINATIONS[destination].label.format(**label_args).strip()
+    selections: dict[str, str] = {}
+    for key, value in query.items():
+        clean_value = _page_value(value)
+        if key in consumed or not _PAGE_KEY_RE.fullmatch(key) or clean_value is None:
+            continue
+        selections[key] = clean_value
+        if len(selections) == _MAX_PAGE_SELECTIONS:
+            break
+    return StudioPage(destination=destination, label=label, args=args, selections=selections)
 
 
 def destination_description(destinations: Mapping[str, StudioLinkDestination]) -> str:

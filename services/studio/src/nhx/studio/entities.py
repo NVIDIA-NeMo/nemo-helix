@@ -15,6 +15,10 @@ class AssistantMessage(BaseModel):
 
     role: Literal["user", "assistant"]
     content: str
+    gate_refusal: bool = Field(
+        default=False,
+        description="True when the topic gate wrote this assistant message instead of the agent.",
+    )
 
 
 class AssistantConversation(EntityBase):
