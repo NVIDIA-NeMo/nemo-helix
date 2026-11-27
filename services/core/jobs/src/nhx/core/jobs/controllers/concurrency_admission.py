@@ -10,9 +10,11 @@ from nemo_helix_plugin.client.errors import NemoClientError
 from nemo_helix_plugin.jobs.client import JobsClient
 from nemo_helix_plugin.jobs.types import HelixJobStepWithContext, ListStepsQueryParams
 from nemo_helix_plugin.workspaces.client import WorkspacesClient
+from nhx.common.entities import SYSTEM_WORKSPACE, SyncEntityClient
 from nhx.common.jobs.schemas import HelixJobStatus
 from nhx.core.jobs.controllers.admission import AdmissionDecision
 from nhx.core.jobs.controllers.backends import extract_provider_profile
+from nhx.core.jobs.entities import JobsUserConcurrencyLimit
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +28,8 @@ IN_FLIGHT_STATUSES = (
 )
 
 ExecutorKey = tuple[str, str]
+
+OVERRIDE_PAGE_SIZE = 1000
 
 
 def principal_of(step: HelixJobStepWithContext) -> str | None:
@@ -69,12 +73,18 @@ class ConcurrencyAdmission:
         executor_limits: Mapping[ExecutorKey, int],
         max_active_jobs_per_workspace: int,
         max_active_jobs_per_user: int,
+        system_entities: SyncEntityClient | None = None,
     ) -> None:
         self._jobs = jobs_client
         self._workspaces = workspaces_client
         self._executor_limits = dict(executor_limits)
         self._workspace_default = max_active_jobs_per_workspace
         self._user_limit = max_active_jobs_per_user
+        self._system_entities = system_entities
+        # Per-user overrides, bulk-loaded once per pass. ``check`` only reads this dict, so a queue of
+        # thousands of steps costs no per-step lookup. On a read failure the last good copy is kept.
+        self._user_overrides: dict[str, int] = {}
+        self._overrides_loaded = system_entities is None
         self._by_executor: Counter[ExecutorKey] = Counter()
         self._by_workspace: Counter[str] = Counter()
         self._by_user: Counter[str] = Counter()
@@ -94,6 +104,37 @@ class ConcurrencyAdmission:
             self._workspace_limits[workspace] = configured if configured is not None else self._workspace_default
         return self._workspace_limits[workspace]
 
+    def user_limit(self, principal: str) -> int:
+        """Limit for a user: their override when one exists, else the Jobs default."""
+        return self._user_overrides.get(principal, self._user_limit)
+
+    def _refresh_user_overrides(self) -> None:
+        """Reload every per-user override with a paginated list. Keeps the previous copy on failure;
+        until one load succeeds, ``check`` defers admission."""
+        if self._system_entities is None:
+            return
+        overrides: dict[str, int] = {}
+        page = 1
+        try:
+            while True:
+                result = self._system_entities.list(
+                    JobsUserConcurrencyLimit,
+                    workspace=SYSTEM_WORKSPACE,
+                    sort="name",  # unique, so paging stays stable if rows change mid-load
+                    page=page,
+                    page_size=OVERRIDE_PAGE_SIZE,
+                )
+                for entity in result.data:
+                    overrides[entity.user_id] = entity.max_concurrent_jobs
+                if page >= result.pagination.total_pages:
+                    break
+                page += 1
+        except Exception:
+            logger.exception("Could not read per-user concurrency overrides; using the last known values")
+            return
+        self._user_overrides = overrides
+        self._overrides_loaded = True
+
     def executor_limit(self, executor: ExecutorKey) -> int | None:
         """Limit for an executor, or ``None`` when the executor is not a configured profile."""
         return self._executor_limits.get(executor)
@@ -102,6 +143,7 @@ class ConcurrencyAdmission:
         """Snapshot current in-flight work. On failure, ``check`` defers until the next pass."""
         self._workspace_limits = {}
         self._unreadable_workspaces = set()
+        self._refresh_user_overrides()
         by_executor: Counter[ExecutorKey] = Counter()
         by_workspace: Counter[str] = Counter()
         by_user: Counter[str] = Counter()
@@ -127,6 +169,10 @@ class ConcurrencyAdmission:
     def check(self, step: HelixJobStepWithContext) -> AdmissionDecision:
         if not self._snapshot_ok:
             return AdmissionDecision.defer("Waiting for capacity: could not determine current load")
+        if not self._overrides_loaded:
+            # No good copy of the overrides yet (e.g. entities was down at controller start). The default could
+            # admit a user past a lower override, so wait rather than guess.
+            return AdmissionDecision.defer("Waiting for capacity: could not determine per-user limits")
 
         executor = extract_provider_profile(step)
         principal = principal_of(step)
@@ -154,10 +200,13 @@ class ConcurrencyAdmission:
                 f"Waiting for capacity: workspace '{step.workspace}' is at its limit "
                 f"({self._by_workspace[step.workspace]}/{workspace_limit} active jobs)"
             )
-        if principal is not None and self._by_user[principal] >= self._user_limit:
-            return AdmissionDecision.defer(
-                f"Waiting for capacity: user is at their limit ({self._by_user[principal]}/{self._user_limit} active jobs)"
-            )
+        if principal is not None:
+            user_limit = self.user_limit(principal)
+            if self._by_user[principal] >= user_limit:
+                kind = "their custom limit" if principal in self._user_overrides else "their limit"
+                return AdmissionDecision.defer(
+                    f"Waiting for capacity: user is at {kind} ({self._by_user[principal]}/{user_limit} active jobs)"
+                )
 
         self._by_executor[executor] += 1
         self._by_workspace[step.workspace] += 1

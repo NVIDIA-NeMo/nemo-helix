@@ -13,6 +13,7 @@ from nhx.core.jobs.controllers.backends import JobUpdate
 from nhx.core.jobs.controllers.backends.registry import BackendRegistry
 from nhx.core.jobs.controllers.concurrency_admission import ConcurrencyAdmission, round_robin_by_user
 from nhx.core.jobs.controllers.scheduler import JobScheduler
+from nhx.core.jobs.entities import JobsUserConcurrencyLimit
 from pytest import fixture
 
 from services.core.jobs.tests.controllers.client_mocks import paginated_response
@@ -58,6 +59,22 @@ def _workspaces_client(limits: dict[str, int] | None = None) -> MagicMock:
     return client
 
 
+def _entities_client(overrides: dict[str, int] | None = None) -> MagicMock:
+    """System entity client whose single page lists a ``JobsUserConcurrencyLimit`` per override."""
+    client = MagicMock()
+    entities = [
+        JobsUserConcurrencyLimit(
+            name=JobsUserConcurrencyLimit.name_for_user(user),
+            workspace="system",
+            user_id=user,
+            max_concurrent_jobs=limit,
+        )
+        for user, limit in (overrides or {}).items()
+    ]
+    client.list.return_value = MagicMock(data=entities, pagination=MagicMock(total_pages=1))
+    return client
+
+
 def _admission(
     jobs_client,
     in_flight: list[HelixJobStepWithContext],
@@ -66,6 +83,8 @@ def _admission(
     workspace: int = 100,
     user: int = 100,
     workspace_caps: dict[str, int] | None = None,
+    overrides: dict[str, int] | None = None,
+    system_entities: MagicMock | None = None,
 ) -> ConcurrencyAdmission:
     jobs_client.list_steps.return_value = paginated_response(in_flight)
     admission = ConcurrencyAdmission(
@@ -74,6 +93,7 @@ def _admission(
         executor_limits={EXECUTOR: executor},
         max_active_jobs_per_workspace=workspace,
         max_active_jobs_per_user=user,
+        system_entities=system_entities if system_entities is not None else _entities_client(overrides),
     )
     admission.begin_pass()
     return admission
@@ -274,3 +294,78 @@ def test_scheduler_shares_scarce_capacity_across_users(
         "a2": HelixJobStatus.QUEUED,
         "a3": HelixJobStatus.QUEUED,
     }
+
+
+def test_override_above_default_admits(mock_jobs_client, test_step_created):
+    running = [_step(test_step_created, "r1", workspace="other", status=HelixJobStatus.ACTIVE)]
+    admission = _admission(mock_jobs_client, running, user=1, overrides={"alice": 3})
+
+    assert admission.check(_step(test_step_created, "new")).admitted
+
+
+def test_override_below_default_defers(mock_jobs_client, test_step_created):
+    running = [_step(test_step_created, "r1", workspace="other", status=HelixJobStatus.ACTIVE)]
+    admission = _admission(mock_jobs_client, running, user=5, overrides={"alice": 1})
+
+    decision = admission.check(_step(test_step_created, "new"))
+
+    assert not decision.admitted
+    assert decision.reason is not None and "custom limit" in decision.reason and "1/1" in decision.reason
+
+
+def test_user_without_override_uses_default(mock_jobs_client, test_step_created):
+    running = [_step(test_step_created, "r1", user="bob", workspace="other", status=HelixJobStatus.ACTIVE)]
+    admission = _admission(mock_jobs_client, running, user=1, overrides={"alice": 3})
+
+    assert not admission.check(_step(test_step_created, "new", user="bob")).admitted
+
+
+def test_override_changes_apply_on_next_pass(mock_jobs_client, test_step_created):
+    running = [_step(test_step_created, "r1", workspace="other", status=HelixJobStatus.ACTIVE)]
+    entities = _entities_client({})
+    admission = _admission(mock_jobs_client, running, user=1, system_entities=entities)
+    waiting = _step(test_step_created, "waiting")
+    assert not admission.check(waiting).admitted
+
+    entities.list.return_value = _entities_client({"alice": 2}).list.return_value
+    admission.begin_pass()
+
+    assert admission.check(waiting).admitted
+
+
+def test_keeps_last_known_overrides_when_listing_fails(mock_jobs_client, test_step_created):
+    running = [_step(test_step_created, "r1", workspace="other", status=HelixJobStatus.ACTIVE)]
+    entities = _entities_client({"alice": 3})
+    admission = _admission(mock_jobs_client, running, user=1, system_entities=entities)
+
+    entities.list.side_effect = RuntimeError("entities down")
+    admission.begin_pass()
+
+    assert admission.check(_step(test_step_created, "new")).admitted
+
+
+def test_overrides_cost_one_list_per_pass_regardless_of_queue_size(mock_jobs_client, test_step_created):
+    entities = _entities_client({"alice": 10_000})
+    admission = _admission(mock_jobs_client, [], user=1, system_entities=entities)
+
+    for i in range(500):
+        admission.check(_step(test_step_created, f"s{i}"))
+
+    assert entities.list.call_count == 1
+
+
+def test_defers_until_overrides_have_loaded_once(mock_jobs_client, test_step_created):
+    entities = _entities_client({"alice": 1})
+    entities.list.side_effect = RuntimeError("entities down")
+    admission = _admission(mock_jobs_client, [], user=100, system_entities=entities)
+
+    decision = admission.check(_step(test_step_created, "new"))
+
+    assert not decision.admitted
+    assert decision.reason is not None and "per-user limits" in decision.reason
+
+    entities.list.side_effect = None
+    entities.list.return_value = _entities_client({"alice": 1}).list.return_value
+    admission.begin_pass()
+
+    assert admission.check(_step(test_step_created, "new")).admitted

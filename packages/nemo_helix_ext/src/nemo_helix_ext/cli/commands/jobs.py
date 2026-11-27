@@ -17,6 +17,7 @@ from nemo_helix_plugin.jobs.schemas import HelixJobResultCreateRequest
 from nemo_helix_plugin.jobs.telemetry import merge_job_telemetry_custom_fields
 from nemo_helix_plugin.jobs.types import (
     CreateHelixJobRequest,
+    CreateUserConcurrencyLimitRequest,
     HelixJobStatusUpdateRequest,
     HelixJobTaskUpdate,
     JobControl,
@@ -25,7 +26,9 @@ from nemo_helix_plugin.jobs.types import (
     ListJobResultsQueryParams,
     ListJobsQueryParams,
     ListStepsQueryParams,
+    ListUserConcurrencyLimitsQueryParams,
     UpdateHelixJobRequest,
+    UpdateUserConcurrencyLimitRequest,
 )
 
 from nemo_helix_ext.cli.core.api import build_kwargs, merge_filter_dict
@@ -78,11 +81,13 @@ attempts_app = create_typer_app(name="attempts", help="Inspect job attempts")
 results_app = create_typer_app(name="results", help="Manage results")
 steps_app = create_typer_app(name="steps", help="Manage steps")
 tasks_app = create_typer_app(name="tasks", help="Manage tasks")
+user_limits_app = create_typer_app(name="user-limits", help="Manage per-user concurrency limit overrides (admin).")
 
 app.add_typer(attempts_app, name="attempts")
 app.add_typer(results_app, name="results")
 app.add_typer(steps_app, name="steps")
 app.add_typer(tasks_app, name="tasks")
+app.add_typer(user_limits_app, name="user-limits")
 
 
 def _jobs_client_from_state(state: CLIContext) -> tuple[NemoClient, JobsClient]:
@@ -2145,3 +2150,125 @@ def retrieve_tasks(
         no_truncate=state.get_no_truncate(),
         timestamp_format=state.get_timestamp_format(),
     )
+
+
+# ---------------------------------------------------------------------------
+# Per-user concurrency limit overrides
+# ---------------------------------------------------------------------------
+
+
+@user_limits_app.command("create")
+@collect_warnings
+@handle_errors
+def create_user_limit(
+    ctx: typer.Context,
+    user_id: Annotated[str, typer.Argument(help="User the override applies to.")],
+    max_concurrent_jobs: Annotated[
+        int, typer.Option("--max-concurrent-jobs", min=1, help="Maximum active jobs for this user.")
+    ],
+    output_format: EntityOutputFormatOption = None,
+) -> None:
+    """Give a user a non-default concurrency limit."""
+    state: CLIContext = ctx.obj
+    _, jobs_client = _jobs_client_from_state(state)
+    result = jobs_client.create_user_concurrency_limit(
+        body=CreateUserConcurrencyLimitRequest(user_id=user_id, max_concurrent_jobs=max_concurrent_jobs)
+    ).data()
+    format_output(
+        result,
+        is_list=False,
+        output_format=state.get_output_format(output_format),
+        no_truncate=state.get_no_truncate(),
+        timestamp_format=state.get_timestamp_format(),
+    )
+
+
+@user_limits_app.command("get")
+@collect_warnings
+@handle_errors
+def get_user_limit(
+    ctx: typer.Context,
+    user_id: Annotated[str, typer.Argument()],
+    output_format: EntityOutputFormatOption = None,
+) -> None:
+    """Get a user's concurrency limit override."""
+    state: CLIContext = ctx.obj
+    _, jobs_client = _jobs_client_from_state(state)
+    result = jobs_client.get_user_concurrency_limit(user_id=user_id).data()
+    format_output(
+        result,
+        is_list=False,
+        output_format=state.get_output_format(output_format),
+        no_truncate=state.get_no_truncate(),
+        timestamp_format=state.get_timestamp_format(),
+    )
+
+
+@user_limits_app.command("list")
+@collect_warnings
+@handle_errors
+def list_user_limits(
+    ctx: typer.Context,
+    page: Annotated[int | None, typer.Option("--page", help="Page number.")] = None,
+    page_size: Annotated[int | None, typer.Option("--page-size", help="Page size.")] = None,
+    output_format: ListOutputFormatOption = None,
+    no_truncate: NoTruncateOption = None,
+    all_pages: Annotated[bool, typer.Option("--all-pages", help="Fetch all pages")] = False,
+) -> None:
+    """List per-user concurrency limit overrides."""
+    state: CLIContext = ctx.obj
+    resolved_output_format = state.get_output_format(output_format)
+    query_params = cast(ListUserConcurrencyLimitsQueryParams, build_kwargs(page=page, page_size=page_size))
+    _, jobs_client = _jobs_client_from_state(state)
+    response = jobs_client.list_user_concurrency_limits(query_params=query_params or None)
+    items = collect_offset_pages(response, all_pages=all_pages)
+    format_output(
+        items,
+        is_list=True,
+        output_format=resolved_output_format,
+        output_columns=[Column("user_id", None), Column("max_concurrent_jobs", None), Column("updated_at", None)],
+        no_truncate=state.get_no_truncate(no_truncate),
+        timestamp_format=state.get_timestamp_format(),
+    )
+    if not all_pages:
+        warn_if_more_pages(items, PaginationType.PAGE_NUMBER)
+
+
+@user_limits_app.command("update")
+@collect_warnings
+@handle_errors
+def update_user_limit(
+    ctx: typer.Context,
+    user_id: Annotated[str, typer.Argument()],
+    max_concurrent_jobs: Annotated[
+        int, typer.Option("--max-concurrent-jobs", min=1, help="Maximum active jobs for this user.")
+    ],
+    output_format: EntityOutputFormatOption = None,
+) -> None:
+    """Change a user's concurrency limit override."""
+    state: CLIContext = ctx.obj
+    _, jobs_client = _jobs_client_from_state(state)
+    result = jobs_client.update_user_concurrency_limit(
+        user_id=user_id, body=UpdateUserConcurrencyLimitRequest(max_concurrent_jobs=max_concurrent_jobs)
+    ).data()
+    format_output(
+        result,
+        is_list=False,
+        output_format=state.get_output_format(output_format),
+        no_truncate=state.get_no_truncate(),
+        timestamp_format=state.get_timestamp_format(),
+    )
+
+
+@user_limits_app.command("delete")
+@collect_warnings
+@handle_errors
+def delete_user_limit(
+    ctx: typer.Context,
+    user_id: Annotated[str, typer.Argument()],
+) -> None:
+    """Remove a user's override so they fall back to the default limit."""
+    state: CLIContext = ctx.obj
+    _, jobs_client = _jobs_client_from_state(state)
+    jobs_client.delete_user_concurrency_limit(user_id=user_id).data()
+    typer.echo("✓ Deleted successfully")

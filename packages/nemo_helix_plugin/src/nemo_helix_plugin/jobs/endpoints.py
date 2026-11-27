@@ -30,6 +30,7 @@ from nemo_helix_plugin.jobs.schemas import (
 )
 from nemo_helix_plugin.jobs.types import (
     CreateHelixJobRequest,
+    CreateUserConcurrencyLimitRequest,
     HelixJobAttemptResponse,
     HelixJobListResultResponse,
     HelixJobListTaskResponse,
@@ -47,7 +48,10 @@ from nemo_helix_plugin.jobs.types import (
     ListJobResultsQueryParams,
     ListJobsQueryParams,
     ListStepsQueryParams,
+    ListUserConcurrencyLimitsQueryParams,
     UpdateHelixJobRequest,
+    UpdateUserConcurrencyLimitRequest,
+    UserConcurrencyLimitResponse,
 )
 
 # The execution-profiles endpoint returns a union over all configured backend
@@ -300,3 +304,37 @@ def update_attempt_step_task(
 def get_attempt_step_task(
     *, workspace: str | None = None, job: str, attempt: str, step: str, name: str
 ) -> HelixJobTaskResponse: ...
+
+
+# ---------------------------------------------------------------------------
+# Per-user concurrency limit overrides (admin)
+# ---------------------------------------------------------------------------
+
+
+@post("/apis/jobs/v2/user-concurrency-limits")
+@abstractmethod
+def create_user_concurrency_limit(*, body: CreateUserConcurrencyLimitRequest) -> UserConcurrencyLimitResponse: ...
+
+
+@get("/apis/jobs/v2/user-concurrency-limits")
+@abstractmethod
+def list_user_concurrency_limits(
+    *, query_params: ListUserConcurrencyLimitsQueryParams | None = None
+) -> Paginated[UserConcurrencyLimitResponse]: ...
+
+
+@get("/apis/jobs/v2/user-concurrency-limits/{user_id}")
+@abstractmethod
+def get_user_concurrency_limit(*, user_id: str) -> UserConcurrencyLimitResponse: ...
+
+
+@put("/apis/jobs/v2/user-concurrency-limits/{user_id}")
+@abstractmethod
+def update_user_concurrency_limit(
+    *, user_id: str, body: UpdateUserConcurrencyLimitRequest
+) -> UserConcurrencyLimitResponse: ...
+
+
+@delete("/apis/jobs/v2/user-concurrency-limits/{user_id}")
+@abstractmethod
+def delete_user_concurrency_limit(*, user_id: str) -> None: ...

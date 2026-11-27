@@ -4141,6 +4141,7 @@ nemo jobs [OPTIONS] COMMAND [ARGS]...
 * `results`: Manage results
 * `steps`: Manage steps
 * `tasks`: Manage tasks
+* `user-limits`: Manage per-user concurrency limit overrides (admin).
 
 #### nemo jobs cancel
 
@@ -5095,6 +5096,145 @@ nemo jobs tasks get [OPTIONS] NAME
 **Output Options:**
 
 * `--output-format, --output, -f <CHOICE>`: Output format for an entity. [possible values: json, yaml, raw, code]
+
+#### nemo jobs user-limits
+
+Manage per-user concurrency limit overrides (admin).
+
+**Usage:**
+
+```shell
+nemo jobs user-limits [OPTIONS] COMMAND [ARGS]...
+```
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+**Commands:**
+
+* `create`: Give a user a non-default concurrency limit.
+* `get`: Get a user's concurrency limit override.
+* `list`: List per-user concurrency limit overrides.
+* `update`: Change a user's concurrency limit override.
+* `delete`: Remove a user's override so they fall back to the default...
+
+##### nemo jobs user-limits create
+
+Give a user a non-default concurrency limit.
+
+**Usage:**
+
+```shell
+nemo jobs user-limits create [OPTIONS] USER_ID
+```
+
+**Arguments:**
+
+* `<USER_ID>`: User the override applies to.
+
+**Options:**
+
+* `--max-concurrent-jobs <INTEGER RANGE>`: Maximum active jobs for this user.
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for an entity. [possible values: json, yaml, raw, code]
+
+##### nemo jobs user-limits get
+
+Get a user's concurrency limit override.
+
+**Usage:**
+
+```shell
+nemo jobs user-limits get [OPTIONS] USER_ID
+```
+
+**Arguments:**
+
+* `<USER_ID>`
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for an entity. [possible values: json, yaml, raw, code]
+
+##### nemo jobs user-limits list
+
+List per-user concurrency limit overrides.
+
+**Usage:**
+
+```shell
+nemo jobs user-limits list [OPTIONS]
+```
+
+**Options:**
+
+* `--page <INTEGER>`: Page number.
+* `--page-size <INTEGER>`: Page size.
+* `--all-pages`: Fetch all pages
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for the list of results. [possible values: table, json, yaml, markdown, csv, raw, code]
+* `--no-truncate`: Don't truncate long values in table/markdown/csv output.
+
+##### nemo jobs user-limits update
+
+Change a user's concurrency limit override.
+
+**Usage:**
+
+```shell
+nemo jobs user-limits update [OPTIONS] USER_ID
+```
+
+**Arguments:**
+
+* `<USER_ID>`
+
+**Options:**
+
+* `--max-concurrent-jobs <INTEGER RANGE>`: Maximum active jobs for this user.
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for an entity. [possible values: json, yaml, raw, code]
+
+##### nemo jobs user-limits delete
+
+Remove a user's override so they fall back to the default limit.
+
+**Usage:**
+
+```shell
+nemo jobs user-limits delete [OPTIONS] USER_ID
+```
+
+**Arguments:**
+
+* `<USER_ID>`
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
 
 ### nemo models
 

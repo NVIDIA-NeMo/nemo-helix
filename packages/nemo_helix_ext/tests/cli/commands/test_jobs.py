@@ -33,6 +33,8 @@ from nemo_helix_ext.cli.commands.jobs import (
 from nemo_helix_ext.cli.core.context import CLIContext
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.client.types import RetryPolicy
+from nemo_helix_plugin.jobs.client import JobsClient
+from nemo_helix_plugin.jobs.types import CreateUserConcurrencyLimitRequest, UpdateUserConcurrencyLimitRequest
 from typer.testing import CliRunner
 
 
@@ -705,3 +707,58 @@ def test_jobs_task_update_code_generation_uses_attempt_route() -> None:
     assert "update_attempt_step_task" in code
     assert "update_job_step_task" not in code
     assert "attempt=args['attempt_id']" in code
+
+
+def test_user_limits_create_update_delete_call_typed_client() -> None:
+    jobs_client = MagicMock()
+    jobs_client.create_user_concurrency_limit.return_value = _Response(SimpleNamespace(user_id="alice"))
+    jobs_client.update_user_concurrency_limit.return_value = _Response(SimpleNamespace(user_id="alice"))
+    jobs_client.delete_user_concurrency_limit.return_value = _Response(None)
+    client = MagicMock()
+
+    with (
+        patch("nemo_helix_ext.cli.commands.jobs.JobsClient.from_client", return_value=jobs_client),
+        patch("nemo_helix_ext.cli.commands.jobs.format_output"),
+    ):
+        for args in (
+            ["user-limits", "create", "alice", "--max-concurrent-jobs", "7"],
+            ["user-limits", "update", "alice", "--max-concurrent-jobs", "9"],
+            ["user-limits", "delete", "alice"],
+        ):
+            result = CliRunner().invoke(app, args, obj=CLIContext(_client=client))
+            assert result.exit_code == 0, result.output
+
+    jobs_client.create_user_concurrency_limit.assert_called_once_with(
+        body=CreateUserConcurrencyLimitRequest(user_id="alice", max_concurrent_jobs=7)
+    )
+    jobs_client.update_user_concurrency_limit.assert_called_once_with(
+        user_id="alice", body=UpdateUserConcurrencyLimitRequest(max_concurrent_jobs=9)
+    )
+    jobs_client.delete_user_concurrency_limit.assert_called_once_with(user_id="alice")
+
+
+def test_user_limits_rejects_non_positive_limit() -> None:
+    result = CliRunner().invoke(
+        app,
+        ["user-limits", "create", "alice", "--max-concurrent-jobs", "0"],
+        obj=CLIContext(_client=MagicMock()),
+    )
+
+    assert result.exit_code != 0
+
+
+def test_user_limits_client_quotes_email_style_user_id() -> None:
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.url.raw_path.decode())
+        return httpx.Response(204, request=request)
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as http_client:
+        client = NemoClient(base_url="http://nemo.test", http_client=http_client)
+        JobsClient.from_client(client).delete_user_concurrency_limit(user_id="a+b@x.com?#").data()
+
+    # Reserved characters must not leak into the URL as a query or fragment.
+    assert len(seen) == 1
+    assert seen[0].startswith("/apis/jobs/v2/user-concurrency-limits/a")
+    assert "?" not in seen[0] and "#" not in seen[0]

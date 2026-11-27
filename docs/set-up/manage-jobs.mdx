@@ -116,11 +116,20 @@ When many steps are waiting and capacity is limited, the scheduler takes one ste
 
 If the scheduler cannot read the current load, it queues the steps for that pass and tries again on the next one.
 
-<Note>
+### Overriding limits
 
-A per-workspace override is not available yet. Every workspace uses `max_active_jobs_per_workspace`. A limit per job group is also not available yet.
+A workspace can set its own limit with `limits.max_concurrent_jobs` on the workspace. It replaces `max_active_jobs_per_workspace` for that workspace.
 
-</Note>
+A platform admin can give one user a different limit than `max_active_jobs_per_user`:
+
+```bash
+nemo jobs user-limits create alice@example.com --max-concurrent-jobs 200
+nemo jobs user-limits update alice@example.com --max-concurrent-jobs 100
+nemo jobs user-limits list
+nemo jobs user-limits delete alice@example.com   # back to the default
+```
+
+The scheduler reads all user overrides once per pass, not once per job, so a change takes effect within one `schedule_interval_seconds` (5 by default). The user ID must match the submitting user's identity exactly, including case. An ID that does not match any user has no effect. Only admins can manage overrides. A limit per job group is not available yet.
 
 ## Execution Profiles
 

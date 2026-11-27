@@ -178,6 +178,17 @@ authz:
         description: "Read jobs"
       update:
         description: "Update jobs"
+      user-concurrency-limits:
+        create:
+          description: "Create per-user job concurrency limit overrides"
+        delete:
+          description: "Delete per-user job concurrency limit overrides"
+        list:
+          description: "List per-user job concurrency limit overrides"
+        read:
+          description: "Read per-user job concurrency limit overrides"
+        update:
+          description: "Update per-user job concurrency limit overrides"
     models:
       adapters:
         read:
@@ -423,6 +434,11 @@ authz:
       - secrets.rotate
       - models.trust-remote-code.set
       - models.tool-call-plugin.set
+      - jobs.user-concurrency-limits.create
+      - jobs.user-concurrency-limits.delete
+      - jobs.user-concurrency-limits.list
+      - jobs.user-concurrency-limits.read
+      - jobs.user-concurrency-limits.update
     DelegatedService:
       description: "Actor-only capability for authentication-verified delegated Secret access"
       service_only: true
@@ -1896,6 +1912,63 @@ authz:
         scopes:
         - jobs:read
         - platform:read
+    /apis/jobs/v2/user-concurrency-limits:
+      get:
+        direct:
+          actor_perms:
+          - jobs.user-concurrency-limits.list
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - jobs.user-concurrency-limits.list
+        scopes:
+        - jobs:read
+        - platform:read
+      post:
+        direct:
+          actor_perms:
+          - jobs.user-concurrency-limits.create
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - jobs.user-concurrency-limits.create
+        scopes:
+        - jobs:write
+        - platform:write
+    /apis/jobs/v2/user-concurrency-limits/{user_id}:
+      delete:
+        direct:
+          actor_perms:
+          - jobs.user-concurrency-limits.delete
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - jobs.user-concurrency-limits.delete
+        scopes:
+        - jobs:write
+        - platform:write
+      get:
+        direct:
+          actor_perms:
+          - jobs.user-concurrency-limits.read
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - jobs.user-concurrency-limits.read
+        scopes:
+        - jobs:read
+        - platform:read
+      put:
+        direct:
+          actor_perms:
+          - jobs.user-concurrency-limits.update
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - jobs.user-concurrency-limits.update
+        scopes:
+        - jobs:write
+        - platform:write
     /apis/jobs/v2/workspaces/{workspace}/jobs:
       get:
         direct:

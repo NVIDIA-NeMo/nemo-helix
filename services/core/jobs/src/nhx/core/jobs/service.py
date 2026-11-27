@@ -33,6 +33,7 @@ class JobsService(Service[JobsServiceConfig]):
         """Return routers for the jobs service."""
         from nhx.core.jobs.api.v2.jobs import endpoints
         from nhx.core.jobs.api.v2.jobs.rerun import router as rerun_router
+        from nhx.core.jobs.api.v2.jobs.user_limits import router as user_limits_router
 
         return [
             RouterConfig(
@@ -44,5 +45,10 @@ class JobsService(Service[JobsServiceConfig]):
                 rerun_router,
                 tag="Jobs",
                 description="Rerun a failed job from surviving storage",
+            ),
+            RouterConfig(
+                user_limits_router,
+                tag="Jobs",
+                description="Per-user concurrency limit overrides",
             ),
         ]
