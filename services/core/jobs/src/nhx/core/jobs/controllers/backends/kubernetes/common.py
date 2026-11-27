@@ -868,12 +868,18 @@ def build_step_network_policy(step: HelixJobStepWithContext) -> client.V1Network
     network = step.step_spec.network if step.step_spec else None
     if network is None:
         return None
+    job_uid = step.job_id
+    if not job_uid:
+        # Without the job's UUID there is nothing safe to match peers by: fail closed rather than admit by name.
+        raise FailedToScheduleError(
+            f"Cannot create a NetworkPolicy for job step {step.job}/{step.name}: the step has no job ID"
+        )
     managed = {JOB_MANAGED_BY_LABEL: JOB_MANAGED_BY_JOBS_CONTROLLER}
     ingress = [
         client.V1NetworkPolicyIngressRule(
             _from=[
                 client.V1NetworkPolicyPeer(
-                    pod_selector=client.V1LabelSelector(match_labels={**managed, JOB_UID_LABEL: step.job_id})
+                    pod_selector=client.V1LabelSelector(match_labels={**managed, JOB_UID_LABEL: job_uid})
                 )
             ]
         )
@@ -883,7 +889,7 @@ def build_step_network_policy(step: HelixJobStepWithContext) -> client.V1Network
             client.V1NetworkPolicyIngressRule(
                 _from=[
                     client.V1NetworkPolicyPeer(
-                        pod_selector=client.V1LabelSelector(match_labels={rule.job_id_label: step.job_id})
+                        pod_selector=client.V1LabelSelector(match_labels={rule.job_id_label: job_uid})
                     )
                 ],
                 ports=_network_policy_ports(rule),
@@ -895,7 +901,7 @@ def build_step_network_policy(step: HelixJobStepWithContext) -> client.V1Network
         metadata=client.V1ObjectMeta(name=name_for_step(step), labels=common_labels_for_step(step)),
         spec=client.V1NetworkPolicySpec(
             pod_selector=client.V1LabelSelector(
-                match_labels={**managed, JOB_ID_LABEL: step.job, JOB_UID_LABEL: step.job_id, JOB_STEP_ID_LABEL: step.id}
+                match_labels={**managed, JOB_ID_LABEL: step.job, JOB_UID_LABEL: job_uid, JOB_STEP_ID_LABEL: step.id}
             ),
             policy_types=["Ingress"],
             ingress=ingress,

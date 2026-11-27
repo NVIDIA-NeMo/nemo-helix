@@ -268,7 +268,8 @@ class VolcanoJobBackend(
         common_labels[JOB_EXECUTION_BACKEND_LABEL] = self.BACKEND_NAME
         common_labels[JOB_EXECUTION_PROFILE_LABEL] = self._profile_name
         # Peers are admitted by this, not the job name (see build_step_network_policy).
-        common_labels[JOB_UID_LABEL] = step.job_id
+        if step.job_id:
+            common_labels[JOB_UID_LABEL] = step.job_id
 
         if executor_config.resources is not None and executor_config.resources.num_gpus is not None:
             num_gpus = executor_config.resources.num_gpus

@@ -4158,6 +4158,14 @@ def test_schedule_keeps_the_job_creation_error_when_policy_cleanup_fails(
     assert raised.value.status == 422
 
 
+def test_build_step_network_policy_fails_closed_without_a_job_id(test_step_pending):
+    step = _step_with_network(test_step_pending)
+    step.job_id = None
+
+    with pytest.raises(FailedToScheduleError, match="no job ID"):
+        build_step_network_policy(step)
+
+
 def test_schedule_fails_closed_when_network_policy_cannot_be_created(
     kubernetes_job, cpu_execution_provider, test_step_pending
 ):
