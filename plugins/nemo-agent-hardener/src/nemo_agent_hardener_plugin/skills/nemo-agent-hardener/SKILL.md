@@ -58,6 +58,11 @@ they pick. Do not dump every path at them.
 
 ## 1. Pre-flight
 
+Requires NeMo Helix >= 0.1.0 installed from source (the PyPI package has no Agent Hardener
+plugin), Docker, OpenShell >= 0.1.4 with its gateway, and an NVIDIA API key. Give the machine
+at least 16 GB of memory (32 GB recommended) and 50 GB of free disk. This workflow is not
+sandbox-safe: it builds images, starts containers, and makes network calls.
+
 Check the machine before anything else. On a clean VM, or when any check below fails, walk
 [references/setup.md](references/setup.md) section by section (VM checks, Helix from source, the
 services, OpenShell, the model key, `setup`) and come back here with `doctor` green.
