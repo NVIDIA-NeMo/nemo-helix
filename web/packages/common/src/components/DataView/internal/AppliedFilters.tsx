@@ -89,7 +89,7 @@ export function ColumnFilterTag({
   const filterDef = column.columnDef.meta.filter;
   const columnLabel = filterDef.label ?? column.columnDef.header;
   const optionsValuesOverrides =
-    (filterDef.type === 'single-select' || filterDef.type === 'multi-select') &&
+    'options' in filterDef &&
     filterDef.options?.reduce<Record<string, string>>((acc, curr) => {
       acc[curr.value] = curr.label ?? curr.value;
       return acc;

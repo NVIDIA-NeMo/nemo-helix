@@ -365,7 +365,9 @@ describe('FilesetCreateModal', () => {
         page_size: 1,
         filter: { name: 'taken' },
       });
-      expect(screen.getByRole('button', { name: 'Create Dataset' })).toBeDisabled();
+      await waitFor(() =>
+        expect(screen.getByRole('button', { name: 'Create Dataset' })).toBeDisabled()
+      );
     });
 
     it('confirms a free name with the workspace it will be created in', async () => {

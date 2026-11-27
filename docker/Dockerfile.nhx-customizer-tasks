@@ -91,12 +91,12 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     "jupyter-server>=2.20.0,<3" \
     "mistune>=3.3.3,<4" \
     "notebook>=7.6.3,<8" \
-    "pillow>=12.3.0,<13" \
+    "pillow>=13.0.0,<14" \
     "soupsieve>=2.8.4,<3" \
     "tornado>=6.5.7,<7" \
     "urllib3>=2.7.0,<3" \
-    "GitPython>=3.1.60,<4" \
-    "wandb>=0.31.0"
+    "GitPython>=3.2.1,<4" \
+    "wandb>=0.31.2"
 
 # CVE cleanup for unused/stale packages from the NGC base image. The task entry
 # points import from /opt/venv; scanners still report the shadowed system copies.

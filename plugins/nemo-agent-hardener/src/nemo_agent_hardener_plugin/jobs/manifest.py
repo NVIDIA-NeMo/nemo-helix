@@ -74,7 +74,7 @@ DEFENDER_ENTRIES: dict[str, dict[str, Any]] = {
     },
     "guardrails": {
         "name": "defender-guardrails",
-        "implementation": "agent_hardener.agents.defenders.guardrails_defender_v2.guardrails_defender_agent:run",
+        "implementation": "agent_hardener.agents.defenders.guardrails_defender:run",
         "timeout_seconds": 300,
         "capabilities": (
             "Mitigates prompt injection, unsafe tool invocations, sensitive content disclosure, "

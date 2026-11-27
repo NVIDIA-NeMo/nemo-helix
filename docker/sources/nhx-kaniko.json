@@ -2,12 +2,12 @@
   "sources": [
     {
       "name": "kaniko",
-      "version": "1.28.5",
+      "version": "1.29.2",
       "license": "Apache-2.0",
-      "url": "https://github.com/osscontainertools/kaniko/archive/refs/tags/v1.28.5.tar.gz",
-      "sha256": "37362cb5fb31c1b1f4de07d4c1150f158864b52aa85a9c9a93f145666fd6eef8",
+      "url": "https://github.com/osscontainertools/kaniko/archive/refs/tags/v1.29.2.tar.gz",
+      "sha256": "bbbdc8fb2d6ce28b6ed6fe310956c6045a0d27fe60c60d39f7712f3d306387e5",
       "covers": [
-        "go-module:github.com/osscontainertools/kaniko@v1.28.5",
+        "go-module:github.com/osscontainertools/kaniko@v1.29.2",
         "go-module:github.com/osscontainertools/kaniko@(devel)"
       ]
     },

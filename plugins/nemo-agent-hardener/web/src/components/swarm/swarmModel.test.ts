@@ -22,6 +22,18 @@ describe('reconSteps', () => {
     expect(steps[0]?.label).toBe('parsed capabilities');
   });
 
+  it('appends what the step produced, and a re-run step keeps its row with its latest result', () => {
+    const steps = reconSteps([
+      evt('synth_phase', { phase: 'gap_detector', label: 'checked the profile for gaps', detail: '2 gaps unresolved' }),
+      evt('synth_phase', { phase: 'critic', label: 'filtered and deduplicated requests', detail: '' }),
+      evt('synth_phase', { phase: 'gap_detector', label: 'checked the profile for gaps', detail: '0 gaps unresolved' }),
+    ]);
+    expect(steps).toEqual([
+      { phase: 'gap_detector', label: 'checked the profile for gaps — 0 gaps unresolved' },
+      { phase: 'critic', label: 'filtered and deduplicated requests' },
+    ]);
+  });
+
   it('falls back to the phase name when a label is missing and skips phase-less events', () => {
     const steps = reconSteps([evt('synth_phase', { phase: 'critic' }), evt('synth_phase', {})]);
     expect(steps).toEqual([{ phase: 'critic', label: 'critic' }]);

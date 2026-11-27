@@ -18,6 +18,7 @@ export interface EvalJobRow {
   name: string;
   status?: string;
   created_at?: string;
+  updated_at?: string;
   kind: EvalJobKind;
   agentName: string | null;
   configLabel: string | null;
@@ -26,7 +27,17 @@ export interface EvalJobRow {
   evaluationName: string | null;
   /** The evaluator's run rollup from the job's status details; null for jobs that predate it. */
   outcome: EvalRunOutcome | null;
+  /** Input plus output tokens the job reports spending, when it reports any. */
+  totalTokens?: number;
 }
+
+const jobTotalTokens = (job: HelixJobResponse): number | undefined => {
+  const details = asRecord(job.status_details);
+  const counts = [details?.input_tokens, details?.output_tokens].filter(
+    (count): count is number => typeof count === 'number' && Number.isFinite(count)
+  );
+  return counts.length > 0 ? counts.reduce((sum, count) => sum + count, 0) : undefined;
+};
 
 const specOf = (job: HelixJobResponse): Record<string, unknown> => job.spec ?? {};
 
@@ -85,11 +96,13 @@ export const toEvalJobRow = (job: HelixJobResponse): EvalJobRow => ({
   name: job.name,
   status: job.status,
   created_at: job.created_at,
+  updated_at: job.updated_at,
   kind: evalJobKind(job),
   agentName: targetNameForEvalJob(job),
   configLabel: evalJobConfigLabel(job),
   evaluationName: publishedEvaluationName(job),
   outcome: evalRunOutcomeOf(job.status_details),
+  totalTokens: jobTotalTokens(job),
 });
 
 /** Task result shape with metrics and scores for evaluation results. */

@@ -117,7 +117,7 @@ def _fake_run_agent_hardener_success(tmp_path: Path):
         target = tmp_path / "synth-storage" / "benign_profiles" / "target-x"
         target.mkdir(parents=True, exist_ok=True)
         (target / "requests.csv").write_text(_HEADER + "search,hi,benign,r,pe\n", encoding="utf-8")
-        return SimpleNamespace(returncode=0), "", None, None
+        return SimpleNamespace(returncode=0), "", None, None, None
 
     return _fake
 
@@ -180,7 +180,7 @@ def test_run_synth_benign_raises_on_subprocess_failure(tmp_path: Path, monkeypat
     manifest = _write_manifest(tmp_path)
     failure = SimpleNamespace(category="sandbox", message="boom", remediation="retry")
     monkeypatch.setattr(
-        execution, "_run_agent_hardener", lambda *a, **k: (SimpleNamespace(returncode=1), "log", None, failure)
+        execution, "_run_agent_hardener", lambda *a, **k: (SimpleNamespace(returncode=1), "log", None, failure, None)
     )
 
     with pytest.raises(AgentHardenerRunError) as exc:
@@ -195,7 +195,7 @@ def test_run_synth_benign_raises_when_no_csv_written(tmp_path: Path, monkeypatch
     manifest = _write_manifest(tmp_path)
     # Success exit but the run produced no requests.csv under the pinned root.
     monkeypatch.setattr(
-        execution, "_run_agent_hardener", lambda *a, **k: (SimpleNamespace(returncode=0), "", None, None)
+        execution, "_run_agent_hardener", lambda *a, **k: (SimpleNamespace(returncode=0), "", None, None, None)
     )
 
     with pytest.raises(AgentHardenerRunError):

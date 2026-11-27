@@ -33,6 +33,39 @@ name: calc
 description: Adds numbers
 `;
 
+const DEFAULT_MODEL_YAML = `${FABRIC_YAML}models:
+  default:
+    provider: nvidia
+    model: \${NEMO_DEFAULT_MODEL}
+`;
+
+const platformEnv = vi.hoisted(() => ({ defaultModel: '' }));
+
+vi.mock('@studio/constants/environment', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@studio/constants/environment')>()),
+  get DEFAULT_MODEL() {
+    return platformEnv.defaultModel;
+  },
+}));
+
+vi.mock('@nemo/common/src/components/ModelSelectV2/WorkspaceModelSelect', () => ({
+  WorkspaceModelSelect: ({
+    value,
+    onValueChange,
+    ...props
+  }: {
+    value: { model: string } | null;
+    onValueChange: (next: { model: string }) => void;
+    'aria-label': string;
+  }) => (
+    <input
+      aria-label={props['aria-label']}
+      value={value?.model ?? ''}
+      onChange={(event) => onValueChange({ model: event.target.value })}
+    />
+  ),
+}));
+
 const makeFile = (relativePath: string, contents: string): File => {
   const file = new File([contents], relativePath.split('/').pop() ?? relativePath, {
     type: 'text/plain',
@@ -81,7 +114,7 @@ interface Scenario {
 
 const mockHelix = ({ filesetExists = false, agentExists = false }: Scenario = {}) => {
   const uploaded: string[] = [];
-  const created: { name?: string }[] = [];
+  const created: { name?: string; config?: { models?: { default?: { model?: string } } } }[] = [];
   const filesets: { storage?: unknown }[] = [];
   const deleted: string[] = [];
   const deployments: { agent?: string; deployment_mode?: string }[] = [];
@@ -111,7 +144,7 @@ const mockHelix = ({ filesetExists = false, agentExists = false }: Scenario = {}
       return HttpResponse.json({ path: 'ok' });
     }),
     http.post(AGENTS_URL, async ({ request }) => {
-      const body = (await request.json()) as { name?: string };
+      const body = (await request.json()) as (typeof created)[number];
       created.push(body);
       return HttpResponse.json({ ...body, workspace }, { status: 201 });
     }),
@@ -259,6 +292,37 @@ describe('NewAgentModal upload tab', () => {
     await waitFor(() => expect(created).toHaveLength(1));
     expect([...uploaded].sort()).toEqual(['agent.yaml', 'mcps/calculator.py']);
     expect(created[0]?.name).toBe('calc');
+  });
+
+  it('asks for a model when agent.yaml defers to the default one, and registers with it', async () => {
+    const user = userEvent.setup();
+    const { created } = mockHelix();
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+    await openUploadTab(dialog);
+    pickDirectory(dialog, [makeFile('calc-agent/agent.yaml', DEFAULT_MODEL_YAML)]);
+    const modelInput = await within(dialog).findByLabelText('Model');
+
+    expect(within(dialog).getByRole('button', { name: 'Register' })).toBeDisabled();
+
+    fireEvent.change(modelInput, { target: { value: `${workspace}/my-model` } });
+    await submit(dialog, user);
+
+    await waitFor(() => expect(created).toHaveLength(1));
+    expect(created[0]?.config?.models?.default?.model).toBe(`${workspace}/my-model`);
+  });
+
+  it('does not ask for a model when agent.yaml names one', async () => {
+    mockHelix();
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+    await openUploadTab(dialog);
+    pickDirectory(dialog);
+    await waitFor(() => expect(within(dialog).getByDisplayValue('calc')).toBeInTheDocument());
+
+    expect(within(dialog).queryByLabelText('Model')).not.toBeInTheDocument();
   });
 
   it('uploads individually picked files, with no directory to hold them', async () => {
@@ -424,6 +488,83 @@ describe('NewAgentModal upload tab', () => {
   });
 });
 
+describe('NewAgentModal with a platform default model', () => {
+  const PLATFORM_MODEL = `${workspace}/platform-model`;
+
+  beforeEach(() => {
+    platformEnv.defaultModel = PLATFORM_MODEL;
+  });
+
+  afterEach(() => {
+    platformEnv.defaultModel = '';
+  });
+
+  const typeRepo = async (dialog: HTMLElement, user: ReturnType<typeof userEvent.setup>) => {
+    await user.type(
+      within(dialog).getByRole('textbox', { name: 'Repository URL' }),
+      'github.com/owner/repo'
+    );
+    await user.tab();
+  };
+
+  it('preselects it for an upload that defers to the default model, and registers with it', async () => {
+    const user = userEvent.setup();
+    const { created } = mockHelix();
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+    await openUploadTab(dialog);
+    pickDirectory(dialog, [makeFile('calc-agent/agent.yaml', DEFAULT_MODEL_YAML)]);
+
+    expect(await within(dialog).findByLabelText('Model')).toHaveValue(PLATFORM_MODEL);
+    await waitFor(() =>
+      expect(within(dialog).getByRole('button', { name: 'Register' })).toBeEnabled()
+    );
+    await submit(dialog, user);
+
+    await waitFor(() => expect(created).toHaveLength(1));
+    expect(created[0]?.config?.models?.default?.model).toBe(PLATFORM_MODEL);
+  });
+
+  it('registers a repository that defers to the default model on the first attempt', async () => {
+    const user = userEvent.setup();
+    const { created, deleted } = mockHelix();
+    server.use(http.get(UPLOAD_URL, () => HttpResponse.text(DEFAULT_MODEL_YAML)));
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+    await openGitHubTab(dialog);
+    await typeRepo(dialog, user);
+
+    expect(await within(dialog).findByLabelText('Model')).toHaveValue(PLATFORM_MODEL);
+    await submit(dialog, user);
+
+    await waitFor(() => expect(created).toHaveLength(1));
+    expect(created[0]?.config?.models?.default?.model).toBe(PLATFORM_MODEL);
+    expect(deleted).toHaveLength(0);
+  });
+
+  it('leaves a repository model that agent.yaml names explicitly alone', async () => {
+    const user = userEvent.setup();
+    const { created } = mockHelix();
+    const explicitYaml = DEFAULT_MODEL_YAML.replace(
+      '${NEMO_DEFAULT_MODEL}',
+      'other/explicit-model'
+    );
+    server.use(http.get(UPLOAD_URL, () => HttpResponse.text(explicitYaml)));
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+    await openGitHubTab(dialog);
+    await typeRepo(dialog, user);
+    await within(dialog).findByLabelText('Model');
+    await submit(dialog, user);
+
+    await waitFor(() => expect(created).toHaveLength(1));
+    expect(created[0]?.config?.models?.default?.model).toBe('other/explicit-model');
+  });
+});
+
 describe('NewAgentModal oversized pick', () => {
   it('rejects a directory far larger than an agent, naming the count', async () => {
     mockHelix();
@@ -568,6 +709,76 @@ describe('NewAgentModal GitHub import', () => {
     expect(within(dialog).queryByText(/If the repository is private/)).not.toBeInTheDocument();
     expect(created).toHaveLength(0);
     await waitFor(() => expect(deleted).toContain(agentSpecFilesetName('repo')));
+  });
+
+  it('asks for a model once the repository agent.yaml turns out to defer to the default one', async () => {
+    const user = userEvent.setup();
+    const { created, deleted } = mockHelix();
+    server.use(http.get(UPLOAD_URL, () => HttpResponse.text(DEFAULT_MODEL_YAML)));
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+    await openGitHubTab(dialog);
+    await typeRepo(dialog, user);
+    await waitFor(() => expect(within(dialog).getByDisplayValue('repo')).toBeInTheDocument());
+    await submit(dialog, user);
+
+    expect(
+      await within(dialog).findByText(/No default model is selected\. Choose a model/)
+    ).toBeInTheDocument();
+    expect(created).toHaveLength(0);
+    await waitFor(() => expect(deleted).toContain(agentSpecFilesetName('repo')));
+    expect(within(dialog).getByRole('button', { name: 'Register' })).toBeDisabled();
+
+    fireEvent.change(within(dialog).getByLabelText('Model'), {
+      target: { value: `${workspace}/my-model` },
+    });
+    await submit(dialog, user);
+
+    await waitFor(() => expect(created).toHaveLength(1));
+    expect(created[0]?.config?.models?.default?.model).toBe(`${workspace}/my-model`);
+  });
+
+  it('keeps asking for a model when only the formatting of the repository URL changes', async () => {
+    const user = userEvent.setup();
+    mockHelix();
+    server.use(http.get(UPLOAD_URL, () => HttpResponse.text(DEFAULT_MODEL_YAML)));
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+    await openGitHubTab(dialog);
+    await typeRepo(dialog, user);
+    await waitFor(() => expect(within(dialog).getByDisplayValue('repo')).toBeInTheDocument());
+    await submit(dialog, user);
+    await within(dialog).findByLabelText('Model');
+
+    await user.type(within(dialog).getByRole('textbox', { name: 'Repository URL' }), ' ');
+
+    expect(within(dialog).getByLabelText('Model')).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: 'Register' })).toBeDisabled();
+  });
+
+  it('does not reuse a model chosen for an upload when importing a repository', async () => {
+    const user = userEvent.setup();
+    const { created } = mockHelix();
+    server.use(http.get(UPLOAD_URL, () => HttpResponse.text(DEFAULT_MODEL_YAML)));
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+    await openUploadTab(dialog);
+    pickDirectory(dialog, [makeFile('calc-agent/agent.yaml', DEFAULT_MODEL_YAML)]);
+    fireEvent.change(await within(dialog).findByLabelText('Model'), {
+      target: { value: `${workspace}/upload-model` },
+    });
+
+    await openGitHubTab(dialog);
+    await typeRepo(dialog, user);
+    await submit(dialog, user);
+
+    expect(
+      await within(dialog).findByText(/No default model is selected\. Choose a model/)
+    ).toBeInTheDocument();
+    expect(created).toHaveLength(0);
   });
 
   it('reads a private repository with the chosen access token secret', async () => {

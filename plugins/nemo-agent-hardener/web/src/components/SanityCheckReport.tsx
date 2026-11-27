@@ -2,6 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type {
+  AttackOutcome,
+  AttackStatus,
+  BenignOutcome,
+  BenignStatus,
   ValidationAttackRow,
   ValidationBenignRow,
   ValidationReport,
@@ -11,40 +15,67 @@ import { FEEDBACK } from '@agent-hardener/theme';
 import { Badge, Card, Flex, Stack, Text } from '@nvidia/foundations-react-core';
 import { FC } from 'react';
 
-/**
- * Scorecard tallies.
- *
- * `ok` is the good outcome (attack blocked / benign still complied), `bad` the actionable
- * failure, and `errored` the items that produced neither — the run could not decide. Those are
- * counted apart on purpose: folding them into `ok` overstates how well the defenses held, which
- * for a security tool is the wrong direction to be wrong in.
- */
+// Scorecard tallies: `errored` items could not be decided, and `notCounted` ones are left out of `total`.
 export interface ScorecardCounts {
   ok: number;
   bad: number;
   errored: number;
+  notCounted: number;
   total: number;
 }
 
-const tally = (statuses: (string | undefined)[], okStatus: string, badStatus: string): number[] => [
-  statuses.filter((s) => s === okStatus).length,
-  statuses.filter((s) => s === badStatus).length,
-];
+// How an attack counts; a result written before the traces labels has only a status.
+export const attackOutcome = (row: ValidationAttackRow): AttackOutcome => {
+  if (row.outcome) {
+    return row.outcome;
+  }
+  if (row.status === 'blocked') {
+    return 'blocked';
+  }
+  if (row.status === 'not_blocked') {
+    return 'landed';
+  }
+  return 'error';
+};
+
+// How a benign request counts, with the same fallback for results without an outcome.
+export const benignOutcome = (row: ValidationBenignRow): BenignOutcome => {
+  if (row.outcome) {
+    return row.outcome;
+  }
+  if (row.status === 'passed') {
+    return 'served';
+  }
+  if (row.status === 'refused') {
+    return 'refused';
+  }
+  return 'error';
+};
+
+const count = <T,>(values: T[], value: T): number => values.filter((v) => v === value).length;
 
 export const countBenign = (
   rows: ValidationBenignRow[],
   summary: ValidationSummary
 ): ScorecardCounts => {
-  // A truncated artifact still has a summary, so fall back to it rather than rendering 0/0.
+  // A truncated artifact still has a summary, so count from it.
   if (rows.length === 0) {
-    const total = summary.benign_total ?? 0;
+    const notCounted = summary.benign_not_counted ?? 0;
+    const total = Math.max((summary.benign_total ?? 0) - notCounted, 0);
+    if (summary.benign_served !== undefined) {
+      const ok = summary.benign_served;
+      const bad = summary.benign_refused ?? 0;
+      return { ok, bad, errored: Math.max(total - ok - bad, 0), notCounted, total };
+    }
     const bad = summary.benign_false_positives ?? 0;
-    return { ok: Math.max(total - bad, 0), bad, errored: 0, total };
+    return { ok: Math.max(total - bad, 0), bad, errored: 0, notCounted, total };
   }
-  const statuses = rows.map((row) => row.status);
-  const [ok, bad] = tally(statuses, 'passed', 'refused');
-  // Anything that is neither passed nor refused — including a missing status — is inconclusive.
-  return { ok, bad, errored: rows.length - ok - bad, total: rows.length };
+  const outcomes = rows.map(benignOutcome);
+  const notCounted = count(outcomes, 'not_counted');
+  const ok = count(outcomes, 'served');
+  const bad = count(outcomes, 'refused');
+  const total = rows.length - notCounted;
+  return { ok, bad, errored: total - ok - bad, notCounted, total };
 };
 
 export const countAttacks = (
@@ -54,44 +85,114 @@ export const countAttacks = (
   if (rows.length === 0) {
     const total = summary.attacks_total ?? 0;
     const ok = summary.attacks_blocked ?? 0;
-    return { ok, bad: Math.max(total - ok, 0), errored: 0, total };
+    const bad = summary.attacks_landed ?? Math.max(total - ok, 0);
+    return { ok, bad, errored: Math.max(total - ok - bad, 0), notCounted: 0, total };
   }
-  const statuses = rows.map((row) => row.status);
-  const [ok, bad] = tally(statuses, 'blocked', 'not_blocked');
-  return { ok, bad, errored: rows.length - ok - bad, total: rows.length };
+  const outcomes = rows.map(attackOutcome);
+  const ok = count(outcomes, 'blocked');
+  const bad = count(outcomes, 'landed');
+  return { ok, bad, errored: rows.length - ok - bad, notCounted: 0, total: rows.length };
 };
 
 const plural = (count: number, noun: string): string =>
   `${count} ${noun}${count === 1 ? '' : 's'}`;
 
-/** `7 / 9 · 1 false positive · 1 error` — trailing segments appear only when non-zero. */
-export const formatCounts = (counts: ScorecardCounts, badNoun: string): string =>
+// A count with its noun, or '' for zero; `pluralize: false` keeps nouns like "not blocked" as they are.
+const segment = (count: number, noun: string, pluralize = true): string => {
+  if (count === 0) {
+    return '';
+  }
+  if (!pluralize) {
+    return `${count} ${noun}`;
+  }
+  return plural(count, noun);
+};
+
+/** `7 / 9 · 1 false positive · 1 error · 1 not counted` — trailing segments appear only when non-zero. */
+export const formatCounts = (
+  counts: ScorecardCounts,
+  badNoun: string,
+  pluralizeBad = true
+): string =>
   [
     `${counts.ok} / ${counts.total}`,
-    counts.bad > 0 ? plural(counts.bad, badNoun) : '',
+    segment(counts.bad, badNoun, pluralizeBad),
     counts.errored > 0 ? plural(counts.errored, 'error') : '',
+    counts.notCounted > 0 ? `${counts.notCounted} not counted` : '',
   ]
     .filter(Boolean)
     .join(' · ');
 
-// Maps a per-item status to a badge (green = good, yellow = bad, gray = error/neutral).
-const attackBadge = (status?: string) =>
-  status === 'blocked' ? (
-    <Badge color="green">Blocked</Badge>
-  ) : status === 'not_blocked' ? (
-    <Badge color="yellow">Not blocked</Badge>
-  ) : (
-    <Badge color="gray">Error</Badge>
-  );
+// Green only when something was measured and nothing failed or errored.
+export const attacksHeld = (counts: ScorecardCounts): boolean =>
+  counts.total > 0 && counts.ok === counts.total && counts.errored === 0;
 
-const benignBadge = (status?: string) =>
-  status === 'passed' ? (
-    <Badge color="green">Passed</Badge>
-  ) : status === 'refused' ? (
-    <Badge color="yellow">Wrongly blocked</Badge>
-  ) : (
-    <Badge color="gray">Error</Badge>
-  );
+export const benignHeld = (counts: ScorecardCounts): boolean =>
+  counts.total > 0 && counts.bad === 0 && counts.errored === 0;
+
+// The validator's specific label, shown beside the verdict badge; it never decides the badge's color.
+const ATTACK_REASONS: Partial<Record<AttackStatus, string>> = {
+  blocked_guardrail: 'By guardrail',
+  blocked_network: 'By network',
+  agent_refused: 'Agent refused',
+  tool_not_called: 'Tool not called',
+  tool_failed: 'Tool failed',
+};
+
+const BENIGN_REASONS: Partial<Record<BenignStatus, string>> = {
+  blocked_guardrail: 'By guardrail',
+  blocked_network: 'By network',
+  agent_refused: 'Agent declined',
+  tool_failed: 'Tool failed',
+};
+
+type BadgeColor = 'green' | 'yellow' | 'gray';
+
+export interface Verdict {
+  text: string;
+  color: BadgeColor;
+  reason?: string;
+}
+
+const ERROR_VERDICT: Verdict = { text: 'Error', color: 'gray' };
+
+// Unknown outcomes are an error, as in the scorecard counts.
+export const attackVerdict = (row: ValidationAttackRow): Verdict => {
+  const reason = row.status ? ATTACK_REASONS[row.status] : undefined;
+  switch (attackOutcome(row)) {
+    case 'blocked':
+      return { text: 'Blocked', color: 'green', reason };
+    case 'landed':
+      return { text: 'Not blocked', color: 'yellow', reason };
+    default:
+      return ERROR_VERDICT;
+  }
+};
+
+export const benignVerdict = (row: ValidationBenignRow): Verdict => {
+  const reason = row.status ? BENIGN_REASONS[row.status] : undefined;
+  switch (benignOutcome(row)) {
+    case 'served':
+      return { text: 'Passed', color: 'green', reason };
+    case 'refused':
+      return { text: 'Wrongly blocked', color: 'yellow', reason };
+    case 'not_counted':
+      return { text: 'Not counted', color: 'gray', reason };
+    default:
+      return ERROR_VERDICT;
+  }
+};
+
+const VerdictBadge: FC<{ verdict: Verdict }> = ({ verdict }) => (
+  <Flex align="center" gap="density-xs" className="shrink-0">
+    {verdict.reason ? (
+      <Text kind="body/regular/xs" className="text-subtle">
+        {verdict.reason}
+      </Text>
+    ) : null}
+    <Badge color={verdict.color}>{verdict.text}</Badge>
+  </Flex>
+);
 
 const Stat: FC<{ label: string; value: string; good: boolean }> = ({ label, value, good }) => (
   <Card className="flex-1 p-4">
@@ -121,7 +222,7 @@ const AttackRow: FC<{ row: ValidationAttackRow }> = ({ row }) => (
         </Text>
       ) : null}
     </Stack>
-    <div className="shrink-0">{attackBadge(row.status)}</div>
+    <VerdictBadge verdict={attackVerdict(row)} />
   </Flex>
 );
 
@@ -135,7 +236,7 @@ const BenignRow: FC<{ row: ValidationBenignRow }> = ({ row }) => (
         </Text>
       ) : null}
     </Stack>
-    <div className="shrink-0">{benignBadge(row.status)}</div>
+    <VerdictBadge verdict={benignVerdict(row)} />
   </Flex>
 );
 
@@ -143,22 +244,20 @@ interface SanityCheckReportProps {
   report: ValidationReport;
 }
 
-// The sanity-check scorecard: how many recorded attacks the chosen defenses now block, and how many benign
-// requests they wrongly block (false positives), with a per-item breakdown.
+// The sanity-check scorecard: attacks the chosen defenses block, and benign requests they wrongly block.
 export const SanityCheckReport: FC<SanityCheckReportProps> = ({ report }) => {
   const { summary, attacks, benign } = report;
   const attackCounts = countAttacks(attacks, summary);
   const benignCounts = countBenign(benign, summary);
-  // An errored item means the check could not decide, so it must not read as green.
-  const attacksGood = attackCounts.ok === attackCounts.total && attackCounts.errored === 0;
-  const benignGood = benignCounts.bad === 0 && benignCounts.errored === 0;
+  const attacksGood = attacksHeld(attackCounts);
+  const benignGood = benignHeld(benignCounts);
 
   return (
     <Stack gap="density-xl">
       <Flex gap="density-md">
         <Stat
           label="Attacks blocked"
-          value={formatCounts(attackCounts, 'not blocked')}
+          value={formatCounts(attackCounts, 'not blocked', false)}
           good={attacksGood}
         />
         <Stat

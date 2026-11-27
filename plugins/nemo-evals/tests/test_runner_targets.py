@@ -36,7 +36,8 @@ from pydantic import ValidationError
 #: Target fields a runtime config cannot supply, so a round-trip cannot check them here: ``kind``
 #: discriminates the target union, and the other two come from the ``GymPlacement``.
 #: ``resolved_config`` is what submit-time resolution of a registered agent writes; a live runner never has one.
-WIRE_ONLY_TARGET_FIELDS = {"kind", "environment", "agent_ref_name", "resolved_config"}
+#: ``docker`` asks the deployment for a Docker-enabled sandboxed Gym host; a local runner uses its own machine's.
+WIRE_ONLY_TARGET_FIELDS = {"kind", "environment", "agent_ref_name", "resolved_config", "docker"}
 
 #: The runtime's three agent-selection fields become the target's one ``source``.
 HARBOR_AGENT_VALUES = {

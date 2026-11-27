@@ -35,16 +35,15 @@ describe('TasksetListRoute', () => {
     expect(await screen.findByText('detail page')).toBeInTheDocument();
   });
 
-  it('is read-only: no create button, row actions, or create CTA', async () => {
+  it('opens the create modal from the header', async () => {
     renderList();
-    await screen.findByText('sort-suite');
-    expect(screen.queryByRole('button', { name: /create/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /actions/i })).not.toBeInTheDocument();
+    await userEvent.click(await screen.findByRole('button', { name: 'Create Taskset' }));
+    expect(await screen.findByRole('dialog', { name: 'Create Taskset' })).toBeInTheDocument();
   });
 
-  it('shows the first-use empty state in a workspace with no tasksets', async () => {
+  it('shows the first-use empty state with a create CTA in a workspace with no tasksets', async () => {
     renderList('empty');
     expect(await screen.findByText('No tasksets yet')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /create/i })).not.toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: 'Create Taskset' })).toHaveLength(2);
   });
 });

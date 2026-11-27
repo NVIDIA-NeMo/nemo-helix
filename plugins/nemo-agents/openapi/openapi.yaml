@@ -3060,6 +3060,13 @@ components:
             $ref: '#/components/schemas/GatewayProviderBinding'
           type: object
           title: Providers
+        startup_logs:
+          type: string
+          title: Startup Logs
+          description: Best-effort startup failure log snapshot, at most 500 lines
+            and 64 KiB UTF-8. Retained with this deployment until it is deleted. May
+            contain sensitive application output.
+          default: ''
         agent:
           type: string
           title: Agent

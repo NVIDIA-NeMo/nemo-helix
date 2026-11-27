@@ -11,6 +11,7 @@ cannot ride into user-supplied environment code.
 from __future__ import annotations
 
 import asyncio
+import threading
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -891,9 +892,26 @@ def test_an_empty_injected_secret_is_refused(monkeypatch: pytest.MonkeyPatch) ->
         serve_config(target(env_secrets={"OPENAI_API_KEY": "ws/openai"}), capable_plan(), job_id="job-1")
 
 
+@pytest.fixture
+def armed(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, dict[str, object], str]]:
+    """Records the runner arming the job's sandbox reaper, and on which thread.
+
+    The real call installs a SIGTERM handler and an atexit hook in the test process.
+    """
+    import sandboxed_gym.orchestrator as gym_orchestrator
+
+    calls: list[tuple[str, dict[str, object], str]] = []
+
+    def arm(job_id: str, **kwargs: object) -> None:
+        calls.append((job_id, kwargs, threading.current_thread().name))
+
+    monkeypatch.setattr(gym_orchestrator, "install_job_sandbox_reaper", arm)
+    return calls
+
+
 @pytest.mark.asyncio
 async def test_session_runner_records_target_provenance_before_and_after_run(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, armed: list[tuple[str, dict[str, object], str]]
 ) -> None:
     import sandboxed_gym
     from nhx_evals_sdk.agent_eval.runtimes.gym.sandboxed import SandboxedGymAgentTaskRunner
@@ -939,7 +957,7 @@ async def test_session_runner_records_target_provenance_before_and_after_run(
 
 @pytest.mark.asyncio
 async def test_a_platform_run_scores_each_reward_component_per_trial(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, armed: list[tuple[str, dict[str, object], str]]
 ) -> None:
     # The platform hands AgentEvaluator this wrapper, not SandboxedGymAgentTaskRunner, so the wrapper has to
     # carry the scoring hook too; without it the components stay in trial metadata, unscored.
@@ -1003,11 +1021,51 @@ async def test_a_platform_run_scores_each_reward_component_per_trial(
 
 def test_the_host_env_reaches_the_built_spec() -> None:
     from sandboxed_gym.host.models import BROKER_URL_ENV
+    from sandboxed_gym.runtime.gym_host_runtime import JOB_ENV_ENV_KEY, decode_job_env
 
     spec = built_host_spec(capable_plan(), target(env_vars={"WMT_TRANSLATION_COMET_PY_CACHE": "/shared"}))
 
-    assert spec.bootstrap_env["WMT_TRANSLATION_COMET_PY_CACHE"] == "/shared"
+    assert decode_job_env(spec.bootstrap_env[JOB_ENV_ENV_KEY])["WMT_TRANSLATION_COMET_PY_CACHE"] == "/shared"
     assert spec.bootstrap_env[BROKER_URL_ENV] == "http://10.0.0.5:51234"
+
+
+def test_the_jobs_variables_are_not_the_hosts_container_environment() -> None:
+    """Everything that starts as root in the sandbox runs with the container's environment.
+
+    A job's PATH or LD_PRELOAD there would choose what root executes before the host drops privileges,
+    so the job's variables reach the host only inside one JSON variable it applies afterwards.
+    """
+    from sandboxed_gym.runtime.gym_host_runtime import JOB_ENV_ENV_KEY, decode_job_env
+
+    job_env = {"PATH": "/job/environment/bin", "LD_PRELOAD": "/job/environment/hook.so", "PYTHONPATH": "/x"}
+    spec = built_host_spec(capable_plan(), target(env_vars=job_env))
+
+    assert not set(job_env) & set(spec.bootstrap_env)
+    carried = decode_job_env(spec.bootstrap_env[JOB_ENV_ENV_KEY])
+    assert {name: carried[name] for name in job_env} == job_env
+
+
+def test_a_job_environment_too_large_for_one_variable_is_refused_before_the_host_starts() -> None:
+    """Past Linux's 128 KiB limit on one environment string, the container could not start at all."""
+    with pytest.raises(ValueError, match="the Gym host accepts at most"):
+        built_host_spec(capable_plan(), target(env_vars={"A": "x" * 70_000, "B": "y" * 70_000}))
+
+
+def test_the_jobs_variables_pass_kubernetes_variable_expansion_unchanged() -> None:
+    """Kubernetes expands $(NAME) in a container's variables; inside one JSON string that could corrupt it."""
+    from sandboxed_gym.runtime.gym_host_runtime import JOB_ENV_ENV_KEY, decode_job_env
+
+    spec = built_host_spec(capable_plan(), target(env_vars={"PROMPT": 'say "$(NHX_GYM_GLOBAL_CONFIG)"'}))
+
+    assert "$(" not in spec.bootstrap_env[JOB_ENV_ENV_KEY]
+    assert decode_job_env(spec.bootstrap_env[JOB_ENV_ENV_KEY])["PROMPT"] == 'say "$(NHX_GYM_GLOBAL_CONFIG)"'
+
+
+def test_a_job_cannot_name_the_variable_that_carries_its_environment() -> None:
+    from sandboxed_gym.runtime.gym_host_runtime import JOB_ENV_ENV_KEY
+
+    with pytest.raises(ValueError, match=JOB_ENV_ENV_KEY):
+        built_host_spec(capable_plan(), target(env_vars={JOB_ENV_ENV_KEY: "{}"}))
 
 
 def test_a_job_cannot_move_the_broker_by_naming_its_variable() -> None:
@@ -1070,3 +1128,208 @@ def test_the_generated_instance_and_config_drive_the_host_composition() -> None:
     }
     selection = config[ENVIRONMENT_COMPONENT_SELECTION_CONFIG_KEY]
     assert (selection["agent_instance"], selection["agent_config"]) == ("registered_calc", generated)
+
+
+# --- Docker profile: `docker: true` jobs --------------------------------------------------------------------
+
+PODMAN_IMAGE = "registry.example.com/nhx-gym-host-podman:1.0"
+
+
+def docker_profile(**overrides: Any) -> dict[str, Any]:
+    fields: dict[str, Any] = {
+        "runtime_image": PODMAN_IMAGE,
+        "host_provider_options": {"create": {"extensions": {"bootstrap.execd.isolation": "enable"}}},
+        "egress_allow": ("registry-1.docker.io:443",),
+    }
+    fields.update(overrides)
+    return fields
+
+
+def docker_plan(profile: dict[str, Any] | None = None, **config: Any) -> SandboxPlan:
+    """The plan a `docker: true` job resolves to on a deployment with a Docker profile."""
+    plan = resolve_sandbox_plan(
+        capable_config(sandbox_docker_profile=docker_profile(**(profile or {})), **config), target(docker=True)
+    )
+    assert plan is not None
+    return plan
+
+
+def test_a_docker_profile_can_be_the_only_route_to_a_model() -> None:
+    """A deployment that allows egress only in its Docker profile serves `docker: true` jobs, and only those."""
+    config = capable_config(
+        sandbox_policy_base_urls=(),
+        sandbox_egress_allow=(),
+        sandbox_docker_profile=docker_profile(egress_allow=("models.internal:443", "registry-1.docker.io:443")),
+    )
+
+    plan = resolve_sandbox_plan(config, target(docker=True))
+
+    assert plan is not None
+    assert plan.egress_allow == ("models.internal:443", "registry-1.docker.io:443")
+    with pytest.raises(SandboxUnavailableError, match="no route to a model"):
+        resolve_sandbox_plan(config, target())
+
+
+def test_a_docker_job_gets_the_profile_over_the_deployment_defaults() -> None:
+    plan = docker_plan(
+        {"resources": {"ephemeral-storage": "45Gi"}},
+        sandbox_host_provider_options={"connection": {"request_timeout_s": 1200}, "create": {"resource": {"cpu": "8"}}},
+        sandbox_egress_allow=("pypi.org:443", "registry-1.docker.io:443"),
+        sandbox_resources={"cpu": "2", "memory": "8Gi"},
+    )
+
+    assert plan.runtime_image == PODMAN_IMAGE
+    # Nested settings merge, so the profile adds the isolation extension without restating the rest.
+    assert plan.host_provider_options == {
+        "connection": {"request_timeout_s": 1200},
+        "create": {"resource": {"cpu": "8"}, "extensions": {"bootstrap.execd.isolation": "enable"}},
+    }
+    assert plan.egress_allow == ("pypi.org:443", "registry-1.docker.io:443")
+    assert plan.resources == {"cpu": "2", "memory": "8Gi", "ephemeral-storage": "45Gi"}
+
+
+def test_a_job_that_does_not_ask_for_docker_keeps_the_plain_gym_host() -> None:
+    """The profile's image, privileged setup, storage and registry egress reach only `docker: true` jobs."""
+    config = capable_config(
+        sandbox_docker_profile=docker_profile(resources={"ephemeral-storage": "45Gi"}, container_storage_size="40Gi")
+    )
+
+    assert resolve_sandbox_plan(config, target()) == resolve_sandbox_plan(capable_config(), target())
+
+
+def test_a_docker_job_is_refused_on_a_deployment_without_a_docker_profile() -> None:
+    with pytest.raises(SandboxUnavailableError, match="sandbox_docker_profile"):
+        resolve_sandbox_plan(capable_config(), target(docker=True))
+
+
+def test_a_docker_job_is_refused_where_gym_runs_in_the_job_container() -> None:
+    config = capable_config(sandboxed_gym_default=False, sandbox_docker_profile=docker_profile())
+
+    with pytest.raises(SandboxUnavailableError, match="sandboxed_gym_default"):
+        resolve_sandbox_plan(config, target(docker=True))
+
+
+def test_a_docker_job_is_refused_with_the_local_docker_provider() -> None:
+    with pytest.raises(SandboxUnavailableError, match="opensandbox"):
+        docker_plan(sandbox_host_provider="docker")
+
+
+def test_container_storage_settings_reach_the_hosts_setup_environment() -> None:
+    """The setup reads them from the container's environment, as bytes and a "1"."""
+    from sandboxed_gym.runtime.container_engine import STORAGE_DISCARD_ENV, STORAGE_SIZE_ENV
+
+    plan = docker_plan({"container_storage_size": "100Gi", "container_storage_discard": True})
+    spec = built_host_spec(plan, target(docker=True))
+
+    assert (plan.container_storage_bytes, plan.container_storage_discard) == (100 * 2**30, True)
+    assert spec.bootstrap_env[STORAGE_SIZE_ENV] == str(100 * 2**30)
+    assert spec.bootstrap_env[STORAGE_DISCARD_ENV] == "1"
+
+
+def test_unset_container_storage_settings_leave_the_image_defaults() -> None:
+    from sandboxed_gym.runtime.container_engine import STORAGE_DISCARD_ENV, STORAGE_SIZE_ENV
+
+    spec = built_host_spec(docker_plan(), target(docker=True))
+
+    assert STORAGE_SIZE_ENV not in spec.bootstrap_env
+    assert STORAGE_DISCARD_ENV not in spec.bootstrap_env
+
+
+@pytest.mark.parametrize("name", ["NHX_CONTAINER_STORAGE_SIZE", "NHX_CONTAINER_STORAGE_DISCARD"])
+@pytest.mark.parametrize("operator_sets_it", [True, False])
+def test_a_job_cannot_name_the_container_storage_settings(name: str, operator_sets_it: bool) -> None:
+    profile = {"container_storage_size": "40Gi"} if operator_sets_it else {}
+
+    with pytest.raises(ValueError, match=name):
+        built_host_spec(docker_plan(profile), target(docker=True, env_vars={name: "1"}))
+
+
+def test_a_plan_without_container_storage_settings_serializes_as_before() -> None:
+    """A worker from before these settings forbids unknown plan keys, so an unused setting must not appear."""
+    serialized = capable_plan().serialized()
+
+    assert "container_storage" not in serialized
+    assert SandboxPlan.model_validate_json(serialized) == capable_plan()
+
+
+def test_a_plan_with_container_storage_settings_round_trips() -> None:
+    plan = docker_plan({"container_storage_size": "64Gi", "container_storage_discard": True})
+
+    assert SandboxPlan.model_validate_json(plan.serialized()) == plan
+
+
+@pytest.mark.parametrize("size", ["30", "512Mi", "40 Gi", "40gb"])
+def test_a_container_storage_size_that_is_not_a_quantity_of_at_least_1gi_is_a_config_error(size: str) -> None:
+    with pytest.raises(ValueError, match="container_storage_size|Kubernetes quantity"):
+        EvaluatorConfig(sandbox_docker_profile=docker_profile(container_storage_size=size))
+
+
+def test_a_docker_profile_disk_request_above_the_operators_own_limit_names_the_profile() -> None:
+    with pytest.raises(SandboxUnavailableError, match="sandbox_docker_profile.resources.*ephemeral-storage"):
+        docker_plan(
+            {"resources": {"ephemeral-storage": "40Gi"}},
+            sandbox_host_provider_options={"create": {"resource": {"ephemeral-storage": "30Gi"}}},
+        )
+
+
+def test_a_disk_request_above_the_operators_own_limit_is_refused_at_submit() -> None:
+    with pytest.raises(SandboxUnavailableError, match="ephemeral-storage"):
+        capable_plan(
+            sandbox_resources={"ephemeral-storage": "40Gi"},
+            sandbox_host_provider_options={"create": {"resource": {"ephemeral-storage": "30Gi"}}},
+        )
+
+
+def test_a_disk_request_reaches_the_built_host_spec() -> None:
+    spec = built_host_spec(capable_plan(sandbox_resources={"cpu": "2", "ephemeral-storage": "40Gi"}))
+
+    assert spec.resources == {"cpu": "2", "ephemeral-storage": "40Gi"}
+
+
+@pytest.mark.asyncio
+async def test_the_runner_arms_the_job_reaper_on_its_own_thread_before_starting_a_host(
+    monkeypatch: pytest.MonkeyPatch, armed: list[tuple[str, dict[str, object], str]]
+) -> None:
+    """Only the main thread can install the reaper's SIGTERM handler, and `start` runs in a worker thread.
+
+    Armed only from `start`, a cancel during the host's startup leaves the process blocked until the
+    kubelet's SIGKILL, and the host outlives the job until its TTL.
+    """
+    import sandboxed_gym
+    from nhx_evals_sdk.agent_eval.runtimes.gym.sandboxed import SandboxedGymAgentTaskRunner
+
+    started_on: list[tuple[int, str]] = []
+
+    class Session:
+        def descriptor(self):
+            return SimpleNamespace(rollout_url="http://host", rollout_auth_token=None, headers={})
+
+        def shutdown(self):
+            pass
+
+        async def arun_rollouts(self, examples):
+            return []
+
+    class Orchestrator:
+        def start(self, config):
+            started_on.append((len(armed), threading.current_thread().name))
+            return Session()
+
+    async def collect(self, tasks, config):
+        return []
+
+    monkeypatch.setattr(sandboxed_gym, "SandboxedGymOrchestrator", Orchestrator)
+    monkeypatch.setattr(SandboxedGymAgentTaskRunner, "run_tasks", collect)
+    plan = capable_plan()
+    runner = SessionBackedGymRunner(target=target(), plan=plan, job_id="job-1")
+    caller = threading.current_thread().name
+
+    await runner.run_tasks([])
+
+    assert armed == [
+        ("job-1", {"host_provider": plan.host_provider, "host_provider_options": plan.host_provider_options}, caller)
+    ]
+    # Armed before the host existed, and `start` itself ran on another thread.
+    ((armed_before_start, start_thread),) = started_on
+    assert armed_before_start == 1
+    assert start_thread != caller

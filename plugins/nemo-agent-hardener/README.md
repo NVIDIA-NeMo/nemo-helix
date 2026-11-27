@@ -3,8 +3,8 @@
 
 # nemo-agent-hardener
 
-Red-team and harden a NAT agent. Point Agent Hardener at **an agent registered in the platform** (it does
-not have to be deployed) or at **a local NAT project directory**, and it runs an
+Red-team and harden an agent. Point Agent Hardener at **an agent registered in the platform** (it does
+not have to be deployed) or at **a local project directory**, and it runs an
 **attack → defend → validate** war-game against a sandboxed copy: an attacker swarm probes the agent,
 defenders generate guardrails and sandbox policy, and validators check that the attacks are now
 blocked *and* that ordinary requests still work. Your running deployment is never touched.
@@ -268,7 +268,7 @@ uv run nemo services run --service-group all --controllers models,jobs \
   --host 0.0.0.0 --port 8080 > /tmp/nemo-helix.log 2>&1 &
 ```
 
-Open **http://localhost:8080/studio/** → **Governance → Agent Hardening**. If the entry is missing,
+Open **http://localhost:8080/studio/** → **Safety → Agent Hardening**. If the entry is missing,
 confirm the plugin is installed (`curl -s localhost:8080/apis/plugins`) and hard-reload (⌘⇧R).
 
 1. **Manifests → New Manifest** — pick `react-agent`, accept the detected port and secrets, add any

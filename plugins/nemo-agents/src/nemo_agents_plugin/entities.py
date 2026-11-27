@@ -304,6 +304,13 @@ class AgentDeployment(NemoEntity, entity_type="agent_deployment"):
 
     _auth_context: AuthContext | None = PrivateAttr(default=None)
     providers: dict[str, GatewayProviderBinding] = Field(default_factory=dict)
+    startup_logs: str = Field(
+        default="",
+        description=(
+            "Best-effort startup failure log snapshot, at most 500 lines and 64 KiB UTF-8. "
+            "Retained with this deployment until it is deleted. May contain sensitive application output."
+        ),
+    )
 
     agent: str = Field(default="", description="Name of the Agent entity this deployment is for.")
     config: dict[str, Any] = Field(

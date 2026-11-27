@@ -111,6 +111,25 @@ def test_map_status_failed_count_without_failed_condition_true(
     assert len(details["kubernetes_conditions"]) == 1
 
 
+@pytest.mark.parametrize("failed", [None, 0])
+@patch("nhx.core.jobs.controllers.backends.kubernetes.kubernetes_job.list_pod_status")
+def test_map_status_failed_condition_true_without_failed_count(
+    mock_list_pods: MagicMock, failed: int | None, test_step_pending: HelixJobStepWithContext
+) -> None:
+    """Kubernetes sets Failed=True for reasons such as DeadlineExceeded without counting a failed pod."""
+    cond = MagicMock()
+    cond.type = "Failed"
+    cond.status = "True"
+    cond.message = "DeadlineExceeded"
+    job = _job(failed=failed, conditions=[cond])
+
+    status, details = map_kubernetes_job_status_to_step_status(job, MagicMock(), test_step_pending)
+
+    assert status == HelixJobStatus.ERROR
+    assert details["message"] == "Job failed: DeadlineExceeded"
+    mock_list_pods.assert_not_called()
+
+
 @patch("nhx.core.jobs.controllers.backends.kubernetes.kubernetes_job.list_pod_status")
 def test_map_status_unknown_phase_pods_fallback_pending(
     mock_list_pods: MagicMock, test_step_pending: HelixJobStepWithContext

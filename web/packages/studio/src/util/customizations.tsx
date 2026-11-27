@@ -50,6 +50,12 @@ export const getFormattedTrainingType = (type?: string) => {
     case 'distillation': {
       return 'Distillation';
     }
+    case 'partial_sft': {
+      return 'Partial SFT';
+    }
+    case 'partial_distillation': {
+      return 'Partial Distillation';
+    }
     case 'dpo': {
       return 'DPO';
     }

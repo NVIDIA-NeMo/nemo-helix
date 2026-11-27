@@ -11,6 +11,7 @@
 // (getAccessToken returns the current token after silent renew).
 
 import axios, {
+  isAxiosError,
   type AxiosError,
   type AxiosRequestConfig,
   type AxiosResponse,
@@ -57,3 +58,14 @@ export const customFetch = async <TData>(request: RequestOptions): Promise<TData
 
 // https://orval.dev/reference/configuration/output#mutator
 export type ErrorType<TError> = AxiosError<TError>;
+
+/** The server's `detail` message from a failed request, else `fallback`. */
+export const apiErrorDetail = (error: unknown, fallback: string): string => {
+  if (isAxiosError(error)) {
+    const detail = (error.response?.data as { detail?: unknown } | undefined)?.detail;
+    if (typeof detail === 'string' && detail) {
+      return detail;
+    }
+  }
+  return fallback;
+};

@@ -9980,7 +9980,8 @@ paths:
           $ref: '#/components/schemas/ModelEntityFilter'
         description: Filter models by name, project, workspace, base_model, adapters,
           finetuning_type, prompt, lora_enabled, family, model_providers, description,
-          created_at, and updated_at.
+          metadata fields (display_name, capabilities, input_modalities, output_modalities,
+          context_length, max_output_tokens, parameter_count), created_at, and updated_at.
       responses:
         '200':
           description: Return a list of models
@@ -20701,6 +20702,59 @@ components:
           description: Filter models served by this ModelProvider, in the form {workspace}/{provider_name}.
           title: Model Providers
           type: string
+        display_name:
+          anyOf:
+          - $ref: '#/components/schemas/StringFilter'
+          - type: string
+          description: Filter by the display name in the model's metadata.
+          title: Display Name
+        capabilities:
+          anyOf:
+          - $ref: '#/components/schemas/ModelCapability'
+          - items:
+              $ref: '#/components/schemas/ModelCapability'
+            type: array
+          description: Filter models whose metadata lists this capability, e.g. 'tool_calling'.
+            A list matches models with all of them; use $in for any and $nin for none.
+          title: Capabilities
+        input_modalities:
+          anyOf:
+          - $ref: '#/components/schemas/ModelModality'
+          - items:
+              $ref: '#/components/schemas/ModelModality'
+            type: array
+          description: Filter models whose metadata says they accept this modality,
+            e.g. 'image'. A list matches models that accept all of them; use $in for
+            any and $nin for none.
+          title: Input Modalities
+        output_modalities:
+          anyOf:
+          - $ref: '#/components/schemas/ModelModality'
+          - items:
+              $ref: '#/components/schemas/ModelModality'
+            type: array
+          description: Filter models whose metadata says they produce this modality.
+            A list matches models that produce all of them; use $in for any and $nin
+            for none.
+          title: Output Modalities
+        context_length:
+          anyOf:
+          - $ref: '#/components/schemas/NumberFilter'
+          - type: integer
+          description: Filter by context window in tokens, e.g. filter[context_length][$gte]=128000.
+          title: Context Length
+        max_output_tokens:
+          anyOf:
+          - $ref: '#/components/schemas/NumberFilter'
+          - type: integer
+          description: Filter by maximum output tokens, e.g. filter[max_output_tokens][$gte]=8192.
+          title: Max Output Tokens
+        parameter_count:
+          anyOf:
+          - $ref: '#/components/schemas/NumberFilter'
+          - type: integer
+          description: Filter by total parameter count, e.g. filter[parameter_count][$lte]=10000000000.
+          title: Parameter Count
         created_at:
           allOf:
           - $ref: '#/components/schemas/DatetimeFilter'

@@ -438,6 +438,43 @@ def declare_embedding_pooling(output_path: Path, customizer_config: TrainingStep
     logger.info("Declared %s pooling, normalize=%s in %s", pooling, normalize, output_path)
 
 
+def copy_auto_map_code(output_path: Path, base_model_path: Path) -> None:
+    """Copy the code files a published checkpoint's ``auto_map`` relies on from the base checkpoint.
+
+    A checkpoint that loads through remote code, such as a ``llama_bidirec`` reranker, keeps the
+    base's ``auto_map``, but neither Automodel's save nor a merge writes the code files. Without them
+    ``AutoConfig`` cannot load the published checkpoint. When ``auto_map`` names a module in this
+    checkpoint, every base Python file the output lacks is copied, so the module's relative imports
+    come too. A reference into another repository (``repo--module.Class``) needs no local file.
+
+    Args:
+        output_path: HuggingFace checkpoint directory being published.
+        base_model_path: Base HuggingFace directory the job trained from.
+    """
+    output_path = Path(output_path)
+    base_model_path = Path(base_model_path)
+    config_path = output_path / "config.json"
+    if not config_path.is_file():
+        return
+    with open(config_path) as f:
+        auto_map = json.load(f).get("auto_map") or {}
+
+    references = [ref for value in auto_map.values() for ref in (value if isinstance(value, list) else [value])]
+    modules = {ref.rsplit(".", 1)[0] for ref in references if isinstance(ref, str) and "--" not in ref}
+    if not modules:
+        return
+
+    for source in sorted(base_model_path.rglob("*.py")):
+        target = output_path / source.relative_to(base_model_path)
+        if source.is_file() and not target.exists():
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, target)
+            logger.info("Copied custom code referenced by auto_map from the base checkpoint: %s", target.name)
+    for module in sorted(modules):
+        if not (output_path / Path(*module.split("."))).with_suffix(".py").is_file():
+            logger.warning("auto_map names module %s, which neither the checkpoint nor its base ships", module)
+
+
 def merge_lora_embedding_adapter(
     adapter_path: Path,
     base_model_path: str,
@@ -1046,6 +1083,10 @@ def process_checkpoint(
         # Apply chat template for LLM models only
         if chat_template:
             apply_chat_template_to_checkpoint(output_path, chat_template)
+
+    if checkpoint_format == CheckpointFormat.HF:
+        # Before the ONNX export, which loads this tree with remote code.
+        copy_auto_map_code(output_path, Path(base_model_path))
 
     if (is_embedding or is_cross_encoder) and checkpoint_format != CheckpointFormat.HF_PEFT:
         export_cfg = _resolve_export_config(customizer_config)

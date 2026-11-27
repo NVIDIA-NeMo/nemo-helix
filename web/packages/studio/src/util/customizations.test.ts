@@ -59,6 +59,8 @@ describe('getFormattedTrainingType', () => {
     expect(getFormattedTrainingType('lora')).toEqual('LoRA');
     expect(getFormattedTrainingType('sft')).toEqual('SFT');
     expect(getFormattedTrainingType('distillation')).toEqual('Distillation');
+    expect(getFormattedTrainingType('partial_sft')).toEqual('Partial SFT');
+    expect(getFormattedTrainingType('partial_distillation')).toEqual('Partial Distillation');
     expect(getFormattedTrainingType('all_weights')).toEqual('All Weights');
     expect(getFormattedTrainingType('dpo')).toEqual('DPO');
     expect(getFormattedTrainingType('grpo')).toEqual('GRPO');

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useAgentsForSelect } from '@agent-hardener/api/agents';
+import { apiErrorDetail } from '@agent-hardener/api/fetcher';
 import {
   useInspectAgent,
   useInspectProject,
@@ -100,9 +101,15 @@ export const NewAgentHardenerManifestRoute: FC = () => {
           setValue('secrets', facts.secrets.join(', '));
           setValue('egress', facts.egress.join(', '));
         },
+        onError: (error) => {
+          if (!selectionGuard.isCurrent(generation)) {
+            return;
+          }
+          setError('agent', { message: apiErrorDetail(error, 'Could not read this agent.') });
+        },
       }
     );
-  }, [selectedAgent, workspace, runInspectAgent, setValue, selectionGuard]);
+  }, [selectedAgent, workspace, runInspectAgent, setValue, setError, selectionGuard]);
 
   const uploadProject = useUploadProjectFileset();
   const inspectProject = useInspectProject();
@@ -166,7 +173,10 @@ export const NewAgentHardenerManifestRoute: FC = () => {
         toast.success('Manifest created.');
         navigate(getAgentHardenerManifestListRoute(workspace));
       },
-      onError: () => toast.error('Failed to create the manifest. Check the agent and try again.'),
+      onError: (error) =>
+        toast.error(
+          apiErrorDetail(error, 'Failed to create the manifest. Check the agent and try again.')
+        ),
     },
   });
 

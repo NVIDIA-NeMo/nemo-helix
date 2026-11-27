@@ -25,10 +25,14 @@ from sandboxed_gym.host.models import (
     GymHostVolumeMount,
     render_host_error,
 )
-from sandboxed_gym.host.opensandbox import OpenSandboxGymHostProvider, _create_options_for_host
+from sandboxed_gym.host.opensandbox import OpenSandboxGymHostProvider, _create_options_for_host, host_disk_request_gib
 
 HEALTH_URL = "https://sandbox.example/gym-1/health"
 ROLLOUT_URL = "https://sandbox.example/gym-1/rollouts/run"
+
+
+def _handle() -> GymHostHandle:
+    return GymHostHandle(host_id="gym-1", health_url=HEALTH_URL, rollout_url=ROLLOUT_URL)
 
 
 def _raising(error: Exception):
@@ -53,7 +57,7 @@ def test_readiness_timeout_names_the_url_it_polled(
     """
     handle = GymHostHandle(host_id="gym-1", health_url=HEALTH_URL, rollout_url=ROLLOUT_URL)
 
-    def _refuse(url: str, headers: Any) -> dict[str, Any]:
+    def _refuse(handle: Any) -> dict[str, Any]:
         raise ConnectionRefusedError("connection refused")
 
     monkeypatch.setattr(provider, "_get_json", _refuse)
@@ -155,6 +159,41 @@ def test_an_explicit_resource_cap_is_not_replaced_by_the_host_size() -> None:
     assert options["resource"] == {"cpu": "8", "memory": "16Gi"}
 
 
+def test_no_ephemeral_storage_means_no_disk_request() -> None:
+    assert host_disk_request_gib(None, {}) is None
+    assert host_disk_request_gib({"cpu": "2"}, {}) is None
+    assert host_disk_request_gib({"ephemeral-storage": ""}, {}) is None
+
+
+def test_an_ephemeral_storage_request_is_whole_gib_rounded_up() -> None:
+    assert host_disk_request_gib({"ephemeral-storage": "40Gi"}, {}) == 40
+    assert host_disk_request_gib({"ephemeral-storage": "40G"}, {}) == 38
+
+
+def test_a_disk_request_above_the_operators_own_limit_is_refused_before_create() -> None:
+    """Kubernetes rejects a request above its limit, and the create call would only time out."""
+    with pytest.raises(ValueError, match="limit it to 30Gi"):
+        host_disk_request_gib({"ephemeral-storage": "40Gi"}, {"resource": {"ephemeral-storage": "30Gi"}})
+    # Rounding up must not push a request that fits over the limit's exact size either way.
+    with pytest.raises(ValueError, match="limit it to 40G"):
+        host_disk_request_gib({"ephemeral-storage": "40G"}, {"resource": {"ephemeral-storage": "40G"}})
+    assert host_disk_request_gib({"ephemeral-storage": "40Gi"}, {"resource": {"ephemeral-storage": "40Gi"}}) == 40
+
+
+def test_a_malformed_disk_request_names_the_resource() -> None:
+    with pytest.raises(ValueError, match="ephemeral-storage"):
+        host_disk_request_gib({"ephemeral-storage": "40 GB"}, {})
+
+
+def test_the_disk_request_reaches_the_sandbox_spec_with_cpu_and_memory() -> None:
+    provider = OpenSandboxGymHostProvider()
+    spec = _spec().model_copy(update={"resources": {"cpu": "2", "memory": "4Gi", "ephemeral-storage": "40Gi"}})
+
+    resources = provider._to_sandbox_spec(spec).resources
+
+    assert (resources.cpu, resources.memory_mib, resources.disk_gib) == (2.0, 4096, 40)
+
+
 def test_a_host_that_reports_a_failed_bootstrap_stops_the_poll_immediately(
     provider: OpenSandboxGymHostProvider,
     monkeypatch: pytest.MonkeyPatch,
@@ -167,7 +206,7 @@ def test_a_host_that_reports_a_failed_bootstrap_stops_the_poll_immediately(
     handle = GymHostHandle(host_id="gym-1", health_url=HEALTH_URL, rollout_url=ROLLOUT_URL)
     polls = 0
 
-    def _failed(url: str, headers: Any) -> dict[str, Any]:
+    def _failed(handle: Any) -> dict[str, Any]:
         nonlocal polls
         polls += 1
         return {
@@ -198,9 +237,9 @@ def test_a_503_health_response_keeps_the_body_it_carried(
     """The host reports a failed bootstrap as 503, so discarding that body discards the diagnosis."""
     body = json.dumps({"status": "failed", "error": {"message": "boom"}}).encode("utf-8")
     error = HTTPError(HEALTH_URL, 503, "Service Unavailable", Message(), io.BytesIO(body))
-    monkeypatch.setattr("sandboxed_gym.host.opensandbox.urlopen", _raising(error))
+    monkeypatch.setattr("sandboxed_gym.host.opensandbox.open_host", _raising(error))
 
-    assert provider._get_json(HEALTH_URL, {}) == {"status": "failed", "error": {"message": "boom"}}
+    assert provider._get_json(_handle()) == {"status": "failed", "error": {"message": "boom"}}
 
 
 def test_a_503_health_response_without_a_body_still_reads_as_starting(
@@ -209,9 +248,9 @@ def test_a_503_health_response_without_a_body_still_reads_as_starting(
 ) -> None:
     """The sandbox proxy 503s before the host exists at all, with no JSON of its own."""
     error = HTTPError(HEALTH_URL, 503, "Service Unavailable", Message(), io.BytesIO(b"<html>no route</html>"))
-    monkeypatch.setattr("sandboxed_gym.host.opensandbox.urlopen", _raising(error))
+    monkeypatch.setattr("sandboxed_gym.host.opensandbox.open_host", _raising(error))
 
-    assert provider._get_json(HEALTH_URL, {}) == {"status": "starting"}
+    assert provider._get_json(_handle()) == {"status": "starting"}
 
 
 def test_a_rendered_error_keeps_every_line_the_host_sent() -> None:

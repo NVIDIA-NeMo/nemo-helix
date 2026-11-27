@@ -6,10 +6,15 @@ import {
   type EventCategory,
   type SwarmEvent,
 } from '@agent-hardener/components/eventTypes';
-import { NODES, nodeForAgent, type NodeGroup } from '@agent-hardener/components/swarm/swarmModel';
+import {
+  NODES,
+  nodeForAgent,
+  reconLabel,
+  type NodeGroup,
+} from '@agent-hardener/components/swarm/swarmModel';
 import { ACCENT } from '@agent-hardener/theme';
-import { Flex, Text } from '@nvidia/foundations-react-core';
-import { FC, useLayoutEffect, useMemo, useRef } from 'react';
+import { Flex, Switch, Text } from '@nvidia/foundations-react-core';
+import { FC, useLayoutEffect, useMemo, useRef, useState } from 'react';
 
 interface MessageFeedProps {
   events: SwarmEvent[];
@@ -45,8 +50,30 @@ const num = (value: unknown): number | undefined => (typeof value === 'number' ?
 const humanize = (event: string): string =>
   event.replace(/_/g, ' ').replace(/^\w/, (c) => c.toUpperCase());
 
+// An `output` line's console level (`ok`, `warn`, `fail`, `section`, `detail`); older releases send none.
+const outputLevel = (evt: SwarmEvent): string | undefined =>
+  evt.event === 'output' ? str(evt.payload.level) : undefined;
+
+const LEVEL_COLOR: Record<string, string> = {
+  ok: ACCENT.green,
+  warn: ACCENT.yellow,
+  fail: ACCENT.red,
+};
+
+// `detail` lines are the CLI's `--debug` tier, shown only when the user asks for them.
+export const isFeedEvent = (evt: SwarmEvent, showDetails = false): boolean =>
+  showDetails || outputLevel(evt) !== 'detail';
+
+// An `output` line's color by its level, or undefined to keep the default.
+export const levelColor = (evt: SwarmEvent): string | undefined =>
+  LEVEL_COLOR[outputLevel(evt) ?? ''];
+
 // Color an event's line by its agent's swarm (so it matches the graph), falling back to the event category.
 const lineColor = (evt: SwarmEvent): string => {
+  const byLevel = levelColor(evt);
+  if (byLevel) {
+    return byLevel;
+  }
   const id = nodeForAgent(evt.payload);
   if (id && GROUP_BY_NODE[id]) return GROUP_COLOR[GROUP_BY_NODE[id]];
   return CATEGORY_COLOR[categoryOf(evt.event) ?? 'lifecycle'];
@@ -98,7 +125,7 @@ const formatEvent = (evt: SwarmEvent): string => {
     case 'defender_summary':
       return `Defender summary (${Array.isArray(p.defenders) ? p.defenders.length : 0} defender(s))`;
     case 'synth_phase':
-      return str(p.label) ?? 'Recon step';
+      return reconLabel(p, str(p.phase) ?? 'Recon step');
     case 'interview_started':
       return 'Interview started';
     case 'interview_completed':
@@ -119,7 +146,13 @@ const formatTime = (ts?: number): string =>
 
 // Live tail of the run's EventBus (newest last), auto-scrolling to the bottom unless the user has scrolled
 // up to read history. Highlights the agent(s) currently running and separates each line for readability.
-export const MessageFeed: FC<MessageFeedProps> = ({ events }) => {
+export const MessageFeed: FC<MessageFeedProps> = ({ events: allEvents }) => {
+  const [showDetails, setShowDetails] = useState(false);
+  const hasDetails = useMemo(() => allEvents.some((evt) => !isFeedEvent(evt)), [allEvents]);
+  const events = useMemo(
+    () => allEvents.filter((evt) => isFeedEvent(evt, showDetails)),
+    [allEvents, showDetails]
+  );
   const scrollRef = useRef<HTMLDivElement>(null);
   const atBottomRef = useRef(true);
 
@@ -147,7 +180,7 @@ export const MessageFeed: FC<MessageFeedProps> = ({ events }) => {
     return Array.from(active.entries());
   }, [events]);
 
-  if (events.length === 0) {
+  if (allEvents.length === 0) {
     return (
       <Text kind="body/regular/md" className="text-subtle">
         Waiting for live events…
@@ -157,6 +190,18 @@ export const MessageFeed: FC<MessageFeedProps> = ({ events }) => {
 
   return (
     <div className="flex h-full flex-col">
+      {hasDetails ? (
+        <Flex align="center" gap="density-xs" className="mb-2 shrink-0">
+          <Switch
+            checked={showDetails}
+            onCheckedChange={setShowDetails}
+            aria-label="Show detail lines"
+          />
+          <Text kind="body/regular/sm" className="text-subtle">
+            Show details
+          </Text>
+        </Flex>
+      ) : null}
       {running.length > 0 ? (
         <Flex align="center" gap="density-xs" className="mb-2 shrink-0 flex-wrap">
           <Text kind="body/regular/sm" className="text-subtle">
@@ -198,7 +243,8 @@ export const MessageFeed: FC<MessageFeedProps> = ({ events }) => {
               </span>
               <Text
                 kind="body/regular/sm"
-                className={`min-w-0 break-words ${isRunning ? 'font-semibold' : ''}`}
+                className={`min-w-0 break-words ${isRunning || outputLevel(evt) === 'section' ? 'font-semibold' : ''}`}
+                style={levelColor(evt) ? { color: levelColor(evt) } : undefined}
               >
                 {formatEvent(evt)}
               </Text>

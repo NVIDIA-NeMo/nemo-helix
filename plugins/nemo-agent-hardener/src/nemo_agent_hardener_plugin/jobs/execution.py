@@ -45,6 +45,9 @@ logger = logging.getLogger(__name__)
 
 _LOG_TAIL = 4000
 _EVENT_SINK_URL_ENVVAR = "AGENT_HARDENER_EVENT_SINK_URL"
+# agent-hardener writes its complete log (every record, tracebacks included) to this file. Its console — the
+# captured stdout — shows only one line per warning, so without this a job would lose the detail.
+_LOG_FILE_ENVVAR = "AGENT_HARDENER_LOG_FILE"
 _EVENT_SINK_HEADERS_ENVVAR = "AGENT_HARDENER_EVENT_SINK_HEADERS"
 _NHX_PRINCIPAL_ENVVAR = "NHX_PRINCIPAL"
 _LEGACY_PLATFORM_ENV_PREFIX = "NM" + "P_"
@@ -165,6 +168,7 @@ class RunOutcome:
     log_ref: Any = None
     record_name: str | None = None
     failure: RunFailure | None = None
+    full_log_ref: Any = None
 
 
 def _event_sink_url(workspace: str, run_name: str, *, origin: str | None = None) -> str:
@@ -203,33 +207,55 @@ def _run_command(
 
 def _run_agent_hardener(
     cmd: list[str], env: dict[str, str], log_path: Path, ctx: JobContext, *, artifact_name: str
-) -> tuple[Any, str, Any, RunFailure | None]:
+) -> tuple[Any, str, Any, RunFailure | None, Any]:
     """Run a primary ``agent-hardener`` subprocess, classifying a non-zero exit into a :class:`RunFailure`.
 
     Points agent-hardener at a fresh ``run-error.json`` (its CLI boundary writes a structured cause there) and,
-    on a non-zero exit, prefers that file over a log-tail heuristic. Returns ``(completed, log_text, log_ref,
-    failure)`` where ``failure`` is ``None`` on success. Teardown/best-effort commands use
-    :func:`~nemo_agent_hardener_plugin.jobs._common.execute` directly instead, so they never write the error file.
+    on a non-zero exit, prefers that file over a log-tail heuristic. Also points it at a fresh complete log
+    (``<log>-full.log``) and saves that as the ``<artifact_name>-full`` result. Returns ``(completed, log_text,
+    log_ref, failure, full_log_ref)`` where ``failure`` is ``None`` on success and ``full_log_ref`` is ``None``
+    when no complete log was written (an agent-hardener older than ``AGENT_HARDENER_LOG_FILE``).
+    Teardown/best-effort commands use :func:`~nemo_agent_hardener_plugin.jobs._common.execute` directly instead,
+    so they never write the error file.
     """
     err_path = ctx.storage.persistent / "run-error.json"
-    if err_path.exists():
-        err_path.unlink()  # a stale file from an earlier command in this run would misattribute the cause
-    cmd_env = {**env, AGENT_HARDENER_ERROR_FILE_ENVVAR: str(err_path)}
+    full_log = log_path.with_name(f"{log_path.stem}-full.log")
+    for stale in (err_path, full_log):  # left by an earlier command in this run: would misattribute or mix
+        if stale.exists():
+            stale.unlink()
+    cmd_env = {**env, AGENT_HARDENER_ERROR_FILE_ENVVAR: str(err_path), _LOG_FILE_ENVVAR: str(full_log)}
     _scrub_platform_auth_env(cmd_env)
     completed, log_text, log_ref = _common.execute(cmd, cmd_env, log_path, ctx, artifact_name=artifact_name)
+    full_log_ref = _save_full_log(full_log, ctx, f"{artifact_name}-full")
     failure: RunFailure | None = None
     if completed.returncode != 0:
         classified = classify_subprocess(completed.returncode, log_text[-_LOG_TAIL:], read_run_error(err_path))
         failure = classified.as_failure()
-    return completed, log_text, log_ref, failure
+    return completed, log_text, log_ref, failure, full_log_ref
+
+
+def _save_full_log(path: Path, ctx: JobContext, name: str) -> Any:
+    """Publish agent-hardener's complete log as result ``name``; a failed upload never costs the run."""
+    if not path.is_file():
+        return None
+    try:
+        return ctx.results.save(name, path)
+    except Exception:
+        logger.warning("could not save the agent-hardener log %s as result %s", path, name, exc_info=True)
+        return None
 
 
 def _outcome(
-    completed: Any, log_text: str, log_ref: Any, record_name: str | None, failure: RunFailure | None
+    completed: Any,
+    log_text: str,
+    log_ref: Any,
+    record_name: str | None,
+    failure: RunFailure | None,
+    full_log_ref: Any = None,
 ) -> RunOutcome:
     """Map a finished primary subprocess to a :class:`RunOutcome` (status derived from the exit code)."""
     status = "completed" if completed.returncode == 0 else "failed"
-    return RunOutcome(status, completed.returncode, log_text, log_ref, record_name, failure)
+    return RunOutcome(status, completed.returncode, log_text, log_ref, record_name, failure, full_log_ref)
 
 
 def _prepare_invocation(
@@ -278,10 +304,10 @@ def _run_one_shot(
     """
     cmd, env = _prepare_invocation(manifest, env_file, plugin_config, replay_args, benign_suite, model_env, rounds)
     log_path = ctx.storage.persistent / "agent-hardener.log"
-    completed, log_text, log_ref, failure = _run_agent_hardener(
+    completed, log_text, log_ref, failure, full_log_ref = _run_agent_hardener(
         cmd, env, log_path, ctx, artifact_name="agent-hardener-log"
     )
-    return _outcome(completed, log_text, log_ref, None, failure)
+    return _outcome(completed, log_text, log_ref, None, failure, full_log_ref)
 
 
 def _run_service_driven(
@@ -400,15 +426,15 @@ def _drive_service_run(
         cmd = _run_command(
             bin_path, manifest, benign_suite=suite_path, env_file=env_file, rounds=rounds, replay_args=replay_args
         )
-        completed, log_text, log_ref, failure = _run_agent_hardener(
+        completed, log_text, log_ref, failure, full_log_ref = _run_agent_hardener(
             cmd, env, ctx.storage.persistent / "agent-hardener.log", ctx, artifact_name="agent-hardener-log"
         )
-        return _outcome(completed, log_text, log_ref, record_name, failure)
+        return _outcome(completed, log_text, log_ref, record_name, failure, full_log_ref)
 
     # No cached suite (or regenerating): bring the sandbox up so synth can probe the live victim, run the
     # interview/review HITL, and cache the reviewed suite back on the manifest.
     up_cmd = [str(bin_path), "up", "--config", manifest, *(["--env-file", env_file] if env_file else [])]
-    up_done, _t, _r, up_failure = _run_agent_hardener(
+    up_done, _t, _r, up_failure, _f = _run_agent_hardener(
         up_cmd, env, ctx.storage.persistent / "up.log", ctx, artifact_name="up-log"
     )
     if up_failure is not None:
@@ -452,10 +478,10 @@ def _drive_service_run(
             replay_args=replay_args,
             reuse=True,
         )
-        completed, log_text, log_ref, failure = _run_agent_hardener(
+        completed, log_text, log_ref, failure, full_log_ref = _run_agent_hardener(
             cmd, env, ctx.storage.persistent / "agent-hardener.log", ctx, artifact_name="agent-hardener-log"
         )
-        return _outcome(completed, log_text, log_ref, record_name, failure)
+        return _outcome(completed, log_text, log_ref, record_name, failure, full_log_ref)
     finally:
         _teardown_sandbox(bin_path, manifest, env, ctx)
 
@@ -484,7 +510,7 @@ def run_synth_benign(
         cmd.append("--yes")
     elif interview == "skip":
         cmd.append("--no-interactive")
-    _completed, _log, _ref, failure = _run_agent_hardener(
+    _completed, _log, _ref, failure, _full = _run_agent_hardener(
         cmd, env, ctx.storage.persistent / "synth-benign.log", ctx, artifact_name="synth-benign-log"
     )
     if failure is not None:

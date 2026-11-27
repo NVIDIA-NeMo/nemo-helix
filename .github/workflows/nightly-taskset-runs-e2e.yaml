@@ -47,6 +47,7 @@ jobs:
     outputs:
       source_sha: ${{ steps.plan.outputs.source_sha }}
       copies: ${{ steps.plan.outputs.copies }}
+      families: ${{ steps.bake.outputs.families }}
     steps:
       - id: plan
         shell: bash
@@ -63,16 +64,56 @@ jobs:
           echo "source_sha=${SOURCE_SHA}" >> "${GITHUB_OUTPUT}"
           echo "copies=$(python3 -c "import json, sys; print(json.dumps(list(range(1, int(sys.argv[1]) + 1))))" "${REPEAT}")" >> "${GITHUB_OUTPUT}"
 
+      - name: Checkout the requested revision
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+          ref: ${{ steps.plan.outputs.source_sha }}
+
+      - name: Select Bake image families
+        id: bake
+        shell: bash
+        env:
+          SOURCE_SHA: ${{ steps.plan.outputs.source_sha }}
+        run: |
+          set -euo pipefail
+          groups=
+          if [[ -f docker-bake.hcl ]]; then
+            groups="$(docker buildx bake -f docker-bake.hcl --list=type=targets,format=json |
+              jq -r '.[] | select(.group == true) | .name')"
+          fi
+          families=(api tasks build-tools)
+          missing=()
+          for family in "${families[@]}"; do
+            group="docker-${family}-ci"
+            if ! grep -Fxq "$group" <<< "$groups"; then
+              missing+=("$group")
+            fi
+          done
+          # Build the legacy group once when the revision predates the split.
+          if (( ${#missing[@]} == ${#families[@]} )) && grep -Fxq docker-cpu-ci <<< "$groups"; then
+            families=(cpu)
+          elif (( ${#missing[@]} > 0 )); then
+            echo "::error::Bake groups missing at ${SOURCE_SHA}: ${missing[*]}"
+            exit 1
+          fi
+          echo "families=$(jq -cn '$ARGS.positional' --args "${families[@]}")" >> "$GITHUB_OUTPUT"
+
   build-images:
-    name: Build images
+    name: Build ${{ matrix.family }} images
     needs: [plan]
     permissions:
       contents: read
       packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        family: ${{ fromJSON(needs.plan.outputs.families) }}
     uses: ./.github/workflows/build-cpu-smoke-images.yaml
     with:
+      family: ${{ matrix.family }}
       source_sha: ${{ needs.plan.outputs.source_sha }}
-      checkout_ref: ${{ needs.plan.outputs.source_sha }}  # build exactly the commit under test
+      checkout_ref: ${{ needs.plan.outputs.source_sha }}
       publish: true
 
   kind-taskset-runs-e2e:
@@ -91,6 +132,7 @@ jobs:
     env:
       KIND_CLUSTER_NAME: gha-${{ github.run_id }}-${{ github.run_attempt }}-taskset-runs-${{ matrix.copy }}
       KUBE_NAMESPACE: nemo-helix
+      # Every successful matrix leg returns the same registry and tag.
       NHX_E2E_IMAGE_REGISTRY: ${{ needs.build-images.outputs.image_registry }}
       NHX_E2E_IMAGE_TAG: ${{ needs.build-images.outputs.image_tag }}
     steps:

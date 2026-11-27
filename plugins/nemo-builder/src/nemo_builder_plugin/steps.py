@@ -190,3 +190,24 @@ class PushStepConfig(BaseModel):
                 if not ref.startswith(f"{self.registry}/"):
                     raise ValueError(f"{ref} is not on {self.registry}")
         return self
+
+
+#: Where the remote build step finds the build service's credential, when the deployment names one.
+REMOTE_CREDENTIAL_ENV = "NHX_BUILD_REMOTE_CREDENTIAL"
+
+
+class RemoteBuildImage(BaseModel):
+    name: str = Field(description="The `ContainerImage` row name.")
+    source: ContextSource
+    platform: str
+    registry: str
+    repository: str
+    tag: str = Field(description="The system tag the service publishes the image under.")
+
+
+class RemoteBuildStepConfig(BaseModel):
+    images: list[RemoteBuildImage] = Field(min_length=1)
+    build_timeout_seconds: int = Field(gt=0)
+    settings: dict[str, str] = Field(default_factory=dict, description="`builder.remote.settings`, for the client.")
+    #: Whether a credential secret is configured: the step then refuses to run without it.
+    uses_credential: bool = False

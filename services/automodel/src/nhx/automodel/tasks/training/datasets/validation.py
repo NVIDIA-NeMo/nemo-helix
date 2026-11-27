@@ -97,7 +97,9 @@ def SFT_SCHEMA(prompt_template: str | None = None):
 
 SCHEMAS: dict[str, Callable[[str | None], dict]] = {
     TrainingType.SFT.value: SFT_SCHEMA,
+    TrainingType.PARTIAL_SFT.value: SFT_SCHEMA,
     TrainingType.DISTILLATION.value: SFT_SCHEMA,
+    TrainingType.PARTIAL_DISTILLATION.value: SFT_SCHEMA,
 }
 
 

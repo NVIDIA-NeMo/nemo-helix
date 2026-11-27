@@ -48,6 +48,31 @@ def test_nemo_agents_config_validation_rejects_invalid_payload() -> None:
         validate_agent_config(NEMO_AGENTS_SPEC_CONFIG_FORMAT, config)
 
 
+@pytest.mark.parametrize("model", ["${NEMO_DEFAULT_MODEL}", "$NEMO_DEFAULT_MODEL", "prefix-${NEMO_DEFAULT_MODEL}"])
+def test_nemo_agents_config_validation_rejects_default_model_placeholder(model: str) -> None:
+    config = _nemo_agents_config()
+    config["models"] = {"default": {"provider": "nvidia", "model": model}}
+
+    with pytest.raises(InvalidAgentConfigError, match=r"\$\{NEMO_DEFAULT_MODEL\}"):
+        validate_agent_config(NEMO_AGENTS_SPEC_CONFIG_FORMAT, config)
+
+
+@pytest.mark.parametrize("model", ["default/my-model", "$${NEMO_DEFAULT_MODEL}", "$NEMO_DEFAULT_MODEL_2"])
+def test_nemo_agents_config_validation_accepts_non_placeholder_models(model: str) -> None:
+    config = _nemo_agents_config()
+    config["models"] = {"default": {"provider": "nvidia", "model": model}}
+
+    validated = validate_agent_config(NEMO_AGENTS_SPEC_CONFIG_FORMAT, config)
+
+    assert validated["models"]["default"]["model"] == model
+
+
+def test_nat_config_validation_leaves_default_model_placeholder_to_deploy_time() -> None:
+    config = {"llms": {"main": {"_type": "openai", "model_name": "${NEMO_DEFAULT_MODEL}"}}}
+
+    assert validate_agent_config(NAT_WORKFLOW_CONFIG_FORMAT, config) is config
+
+
 @pytest.mark.usefixtures("installed_adapter_manifests")
 def test_nemo_agents_config_validation_leaves_adapter_ids_to_deploy_time() -> None:
     """Registration can't know which image will run the agent, so an adapter only that image installs is accepted."""

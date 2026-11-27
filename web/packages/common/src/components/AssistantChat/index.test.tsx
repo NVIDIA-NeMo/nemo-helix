@@ -98,6 +98,21 @@ const createReasoningCompletionChunk = (reasoning: string): ChatCompletionChunk 
     ],
   }) as unknown as ChatCompletionChunk;
 
+const createFinishChunk = (
+  finishReason: ChatCompletionChunk.Choice['finish_reason']
+): ChatCompletionChunk => ({
+  ...createCompletionChunk(''),
+  choices: [{ index: 0, delta: {}, finish_reason: finishReason, logprobs: null }],
+});
+
+const createStream = (...chunks: ChatCompletionChunk[]): Stream<ChatCompletionChunk> =>
+  ({
+    controller: new AbortController(),
+    async *[Symbol.asyncIterator]() {
+      yield* chunks;
+    },
+  }) as unknown as Stream<ChatCompletionChunk>;
+
 const createHangingStream = (content: string): Stream<ChatCompletionChunk> => {
   const controller = new AbortController();
   const waitForAbort = () =>
@@ -259,7 +274,7 @@ const createCollapsedDetailsPart = (label: string) =>
     },
   }) as const;
 
-describe('AssistantChat', () => {
+describe('AssistantChat', { timeout: interactionTimeoutMs }, () => {
   beforeEach(() => {
     mocks.createChatCompletion.mockReset();
     mocks.createChatCompletion.mockResolvedValue(completion);
@@ -319,6 +334,7 @@ describe('AssistantChat', () => {
       controller: new AbortController(),
       async *[Symbol.asyncIterator]() {
         yield createImageCompletionChunk(imageUrl);
+        yield createFinishChunk('stop');
       },
     } as unknown as Stream<ChatCompletionChunk>;
     mocks.createChatCompletion.mockResolvedValueOnce(stream);
@@ -341,6 +357,7 @@ describe('AssistantChat', () => {
         yield createReasoningCompletionChunk('Weighing ');
         yield createReasoningCompletionChunk('options.');
         yield createCompletionChunk('Done.');
+        yield createFinishChunk('stop');
       },
     } as unknown as Stream<ChatCompletionChunk>;
     mocks.createChatCompletion.mockResolvedValueOnce(stream);
@@ -355,6 +372,66 @@ describe('AssistantChat', () => {
     expect(screen.getByTestId('assistant-work-thought')).toHaveTextContent(
       'ThoughtWeighing options.'
     );
+  });
+
+  it.each([
+    {
+      name: 'hits the token limit while reasoning',
+      chunks: [createReasoningCompletionChunk('Still thinking'), createFinishChunk('length')],
+      notice: /truncated by max tokens/i,
+    },
+    {
+      name: 'is stopped by the content filter',
+      chunks: [createCompletionChunk('Partial answer'), createFinishChunk('content_filter')],
+      notice: /content filter/i,
+    },
+    {
+      name: 'ends without a finish reason',
+      chunks: [createCompletionChunk('Partial answer')],
+      notice: /ended unexpectedly/i,
+    },
+    {
+      name: 'finishes with reasoning but no answer',
+      chunks: [createReasoningCompletionChunk('Still thinking'), createFinishChunk('stop')],
+      notice: /without returning a response/i,
+    },
+  ])('warns when the reply $name', async ({ chunks, notice }) => {
+    mocks.createChatCompletion.mockResolvedValueOnce(createStream(...chunks));
+
+    renderAssistantChat(<AssistantChat model="test-model" workspace="default" />);
+
+    await userEvent.type(screen.getByRole('textbox', { name: /Task prompt/i }), 'Think');
+    await userEvent.click(screen.getByRole('button', { name: /Submit/i }));
+
+    expect(await screen.findByTestId('assistant-chat-stopped-early-banner')).toHaveTextContent(
+      notice
+    );
+    expect(screen.queryByTestId('assistant-chat-error-banner')).not.toBeInTheDocument();
+  });
+
+  it('does not warn when a streamed reply finishes with an answer', async () => {
+    mocks.createChatCompletion.mockResolvedValueOnce(
+      createStream(createCompletionChunk('All done.'), createFinishChunk('stop'))
+    );
+
+    renderAssistantChat(<AssistantChat model="test-model" workspace="default" />);
+
+    await userEvent.type(screen.getByRole('textbox', { name: /Task prompt/i }), 'Hello');
+    await userEvent.click(screen.getByRole('button', { name: /Submit/i }));
+
+    expect(await screen.findByText('All done.')).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /Regenerate response/i })).toBeInTheDocument();
+    expect(screen.queryByTestId('assistant-chat-stopped-early-banner')).not.toBeInTheDocument();
+  });
+
+  it('does not warn when a non-streamed reply finishes with an answer', async () => {
+    renderAssistantChat(<AssistantChat model="test-model" workspace="default" />);
+
+    await userEvent.type(screen.getByRole('textbox', { name: /Task prompt/i }), 'Hello');
+    await userEvent.click(screen.getByRole('button', { name: /Submit/i }));
+
+    expect(await screen.findByText('Hello from inference gateway.')).toBeInTheDocument();
+    expect(screen.queryByTestId('assistant-chat-stopped-early-banner')).not.toBeInTheDocument();
   });
 
   it('counts reasoning-only chunks when the server reports no usage', async () => {
