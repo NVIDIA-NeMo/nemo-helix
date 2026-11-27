@@ -24,8 +24,7 @@ from structlog.typing import EventDict
 from .otel import settings
 
 if TYPE_CHECKING:
-    from opentelemetry._logs import Logger as OTELLogger
-    from opentelemetry.sdk._logs import LoggerProvider
+    from opentelemetry.sdk._logs import LoggerProvider, LogRecordProcessor
     from opentelemetry.sdk._logs.export import LogRecordExporter
     from opentelemetry.sdk.resources import Resource
 
@@ -47,10 +46,45 @@ def _new_logger_provider(resource: Resource) -> LoggerProvider:
     return LoggerProvider(resource=resource)
 
 
-def _set_logger_provider(logger_provider: LoggerProvider) -> None:
-    from opentelemetry._logs import set_logger_provider
+def _source_path_log_processor() -> LogRecordProcessor:
+    """Strip source directories after the standard handler creates OTel attributes."""
+    import ntpath
+    import re
 
-    set_logger_provider(logger_provider)
+    from opentelemetry.sdk._logs import LogRecordProcessor
+
+    # Match complete frame locations and any trailing frame cut off by the SDK's
+    # attribute-length limit. Preserve the rest of the traceback.
+    frame_path = re.compile(r'(?m)^([ \t|+]*File ")(?:(.+)(", line \d+)(?=, in |$)|[^\n]*\Z)')
+
+    class SourcePathLogProcessor(LogRecordProcessor):
+        def on_emit(self, log_record) -> None:
+            # Preserve SDK limits and dropped-attribute accounting.
+            attributes = log_record.log_record.attributes
+            if attributes is None:
+                return
+            for key in ("code.file.path", "code.filepath"):
+                value = attributes.get(key)
+                if isinstance(value, str):
+                    # ntpath handles both Windows and POSIX source paths.
+                    attributes[key] = ntpath.basename(value)
+            stacktrace = attributes.get("exception.stacktrace")
+            if isinstance(stacktrace, str):
+                attributes["exception.stacktrace"] = frame_path.sub(
+                    lambda match: match[1] + ntpath.basename(match[2]) + match[3] if match[2] is not None else "",
+                    stacktrace,
+                )
+
+        def shutdown(self) -> None:
+            pass
+
+        def force_flush(self, timeout_millis: int = 30000) -> bool:
+            return True
+
+    return SourcePathLogProcessor()
+
+
+_logger_provider: LoggerProvider | None = None
 
 
 def _SpanLogProcessor(logger: logging.Logger, method_name: str, event_dict: dict):
@@ -115,7 +149,11 @@ def _sanitize_log_strings(logger: logging.Logger, method_name: str, event_dict: 
 
 
 def clear_loggers():
+    global _logger_provider
     logging.getLogger().handlers.clear()
+    if _logger_provider is not None:
+        _logger_provider.shutdown()
+        _logger_provider = None
 
 
 class DiscardSensitiveMessages(logging.Filter):
@@ -140,59 +178,34 @@ class DiscardInternalRequests(logging.Filter):
         return not getattr(record, "internal", False)
 
 
-def create_otel_log_processor(otel_logger: OTELLogger) -> Callable[[logging.Logger, str, dict], dict]:
-    """Create a structlog processor that emits logs to OTEL.
+class EnrichOTelLogRecord(logging.Filter):
+    """Enrich the standard handler's records without exporting from a formatter."""
 
-    This processor should be added to the structlog chain BEFORE the final renderer.
-    It emits the fully-enriched event dict to OTEL, then passes through unchanged
-    so stdout rendering still works.
-
-    Args:
-        otel_logger: An OTEL Logger instance from LoggerProvider.get_logger()
-
-    Returns:
-        A structlog processor function
-    """
-
-    def otel_log_processor(logger: logging.Logger, method_name: str, event_dict: dict) -> dict:
-        # NOTE: deferred import -- only reached when OTEL log export is enabled
-        from opentelemetry._logs.severity import SeverityNumber
-
-        body = event_dict.get("message") or event_dict.get("event", "")
-        level = event_dict.get("level", "info").lower()
-        severity = {
-            "debug": SeverityNumber.DEBUG,
-            "info": SeverityNumber.INFO,
-            "warning": SeverityNumber.WARN,
-            "warn": SeverityNumber.WARN,
-            "error": SeverityNumber.ERROR,
-            "critical": SeverityNumber.FATAL,
-            "fatal": SeverityNumber.FATAL,
-        }.get(level, SeverityNumber.INFO)
-
-        attributes = {k: v for k, v in event_dict.items() if k not in ("message", "event", "level") and v is not None}
-
-        otel_logger.emit(
-            body=body,
-            severity_number=severity,
-            severity_text=level.upper(),
-            attributes=attributes,
-        )
-
-        return event_dict
-
-    return otel_log_processor
+    def filter(self, record: logging.LogRecord) -> bool:
+        # Keep exc_info intact: LoggingHandler translates it to standard OTel
+        # exception attributes, alongside native severity and span correlation.
+        fields = {"message": record.getMessage()}
+        _SpanLogProcessor(logging.getLogger(record.name), "", fields)
+        AppContextLogProcessor(logging.getLogger(record.name), "", fields)
+        record.__dict__.update(fields)
+        _sanitize_log_strings(logging.getLogger(record.name), "", record.__dict__)
+        record.msg = record.message
+        record.args = ()
+        return True
 
 
 def initialize_logging(resource: Resource | None = None):
     """
     Initialize structured logging with optional OTLP export.
 
-    When OTEL_LOGS_EXPORTER=otlp, logs are sent to the OTLP endpoint in addition
-    to stdout. The resource parameter should match what's used for traces/metrics.
+    The standard OTel handler is installed unless Python log auto-instrumentation
+    or the SDK is disabled. OTEL_LOGS_EXPORTER=otlp enables direct export alongside
+    console output. The resource should match what's used for traces/metrics.
 
     Based on: https://www.structlog.org/en/stable/standard-library.html#rendering-within-structlog
     """
+    global _logger_provider
+
     if settings.log_format == "json":
         renderer = structlog.processors.JSONRenderer()
         timestamp_processor = structlog.processors.TimeStamper(fmt="iso")
@@ -206,7 +219,7 @@ def initialize_logging(resource: Resource | None = None):
         timestamp_processor = structlog.processors.TimeStamper()
         timestamp_processor._stamper = _stamper
 
-    processors = [
+    processors: list = [
         structlog.stdlib.add_log_level,
         structlog.stdlib.add_logger_name,
         structlog.stdlib.ExtraAdder(),
@@ -230,32 +243,40 @@ def initialize_logging(resource: Resource | None = None):
 
     final_processors: list = [structlog.stdlib.ProcessorFormatter.remove_processors_meta]
 
-    if not settings.otel_sdk_disabled and settings.otel_logs_exporter == "otlp":
-        # NOTE: deferred imports -- only reached when OTEL log export is enabled
-        from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
+    otel_handler = None
+    if not settings.otel_sdk_disabled and settings.otel_python_log_auto_instrumentation:
+        from opentelemetry.sdk._logs import LoggingHandler
 
         from .tracing import create_otel_resource
-
-        protocol = settings.otel_exporter_otlp_logs_protocol or settings.otel_exporter_otlp_protocol
-        endpoint = settings.otel_exporter_otlp_logs_endpoint or settings.otel_exporter_otlp_endpoint
-        if protocol == "http/protobuf":
-            exporter_class = _otlp_log_exporter_class("http")
-
-            # HTTP general endpoints are base URLs; signal-specific endpoints are used as-is.
-            if not settings.otel_exporter_otlp_logs_endpoint and endpoint:
-                endpoint = endpoint.rstrip("/") + "/v1/logs"
-        elif protocol == "grpc":
-            exporter_class = _otlp_log_exporter_class("grpc")
-        else:
-            raise ValueError(f"Unsupported OTLP logs protocol: {protocol}")
 
         if resource is None:
             resource = create_otel_resource()
         logger_provider = _new_logger_provider(resource)
-        logger_provider.add_log_record_processor(BatchLogRecordProcessor(exporter_class(endpoint=endpoint)))
-        _set_logger_provider(logger_provider)
-        otel_logger = logger_provider.get_logger(__name__)
-        final_processors.append(create_otel_log_processor(otel_logger))
+        logger_provider.add_log_record_processor(_source_path_log_processor())
+        otel_handler = LoggingHandler(logger_provider=logger_provider)
+        otel_handler.addFilter(DiscardSensitiveMessages())
+        if not settings.log_internal_requests:
+            otel_handler.addFilter(DiscardInternalRequests())
+        otel_handler.addFilter(EnrichOTelLogRecord())
+
+        if settings.otel_logs_exporter == "otlp":
+            # NOTE: deferred imports -- only reached when OTEL log export is enabled
+            from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
+
+            protocol = settings.otel_exporter_otlp_logs_protocol or settings.otel_exporter_otlp_protocol
+            endpoint = settings.otel_exporter_otlp_logs_endpoint or settings.otel_exporter_otlp_endpoint
+            if protocol == "http/protobuf":
+                exporter_class = _otlp_log_exporter_class("http")
+
+                # HTTP general endpoints are base URLs; signal-specific endpoints are used as-is.
+                if not settings.otel_exporter_otlp_logs_endpoint and endpoint:
+                    endpoint = endpoint.rstrip("/") + "/v1/logs"
+            elif protocol == "grpc":
+                exporter_class = _otlp_log_exporter_class("grpc")
+            else:
+                raise ValueError(f"Unsupported OTLP logs protocol: {protocol}")
+
+            logger_provider.add_log_record_processor(BatchLogRecordProcessor(exporter_class(endpoint=endpoint)))
 
     if settings.log_format == "plain":
         final_processors.append(_drop_console_hidden_fields)
@@ -275,6 +296,9 @@ def initialize_logging(resource: Resource | None = None):
     clear_loggers()
     root_logger = logging.getLogger()
     root_logger.addHandler(handler)
+    if otel_handler is not None:
+        _logger_provider = logger_provider
+        root_logger.addHandler(otel_handler)
     root_logger.setLevel(settings.log_level)
     quiet_loggers()
     apply_extra_log_config()

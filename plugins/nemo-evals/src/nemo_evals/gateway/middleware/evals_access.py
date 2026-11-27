@@ -194,6 +194,7 @@ def refused_call(credential: str, request: InferenceAccessRequest, refusal: Refu
         else {"nemo.provider": f"{request.workspace}/{request.provider_name}"}
     )
     api = CallApi.from_path(request.path)
+    operation = api.gen_ai_operation
     return FinishedCall(
         token=credential,
         name=api.value,
@@ -201,7 +202,7 @@ def refused_call(credential: str, request: InferenceAccessRequest, refusal: Refu
         ended_at=now,
         cancelled=False,
         attributes={
-            "gen_ai.operation.name": "chat",
+            **({"gen_ai.operation.name": operation} if operation is not None else {}),
             "nemo.inference.api": api.value,
             **target,
             "error.type": "model_policy",

@@ -295,8 +295,16 @@ def test_no_virtual_model_can_list_the_access_check() -> None:
     assert not any(access.supports_middleware_phase(phase) for phase in ("request", "response", "post_response"))
 
 
+@pytest.mark.parametrize(
+    ("path", "span_name", "operation"),
+    [
+        ("v1/responses", "responses", "chat"),
+        ("v1/embeddings", "embeddings", "embeddings"),
+        ("v1/models", "other", None),
+    ],
+)
 async def test_a_call_refused_for_its_trials_policy_is_recorded_in_the_trial_as_a_free_failed_call(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, path: str, span_name: str, operation: str | None
 ) -> None:
     """A refused call costs nothing; recording it with zero tokens keeps the trial's usage counted from the gateway."""
     sink = Sink()
@@ -308,7 +316,7 @@ async def test_a_call_refused_for_its_trials_policy_is_recorded_in_the_trial_as_
     request = InferenceAccessRequest(
         request_id="req-1",
         workspace="models",
-        path="v1/responses",
+        path=path,
         headers={"authorization": f"Bearer {TRIAL_TOKEN}"},
         provider_name="nvidia",
     )
@@ -322,7 +330,8 @@ async def test_a_call_refused_for_its_trials_policy_is_recorded_in_the_trial_as_
 
     [(workspace, span)] = _spans(sink.sent)
     attributes = _attributes(span)
-    assert (workspace, span.name, span.status.code) == ("evals", "responses", Status.STATUS_CODE_ERROR)
+    assert (workspace, span.name, span.status.code) == ("evals", span_name, Status.STATUS_CODE_ERROR)
+    assert attributes.get("gen_ai.operation.name") == operation
     assert attributes[GATEWAY_CALL_ATTRIBUTE] is True
     assert attributes["nemo.evals.refusal.reason"] == "provider_route"
     assert attributes["nemo.provider"] == "models/nvidia"

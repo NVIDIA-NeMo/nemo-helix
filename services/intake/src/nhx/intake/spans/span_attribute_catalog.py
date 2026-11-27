@@ -212,6 +212,7 @@ ATTRIBUTE_SPECS = (
         bag=AttributeBag.NUMBER,
         bag_key="llm.token_count.cached",
         source_keys=(
+            "gen_ai.usage.cache_read.input_tokens",
             "gen_ai.usage.cached_tokens",
             "gen_ai.usage.input_cache_tokens",
             "llm.token_count.prompt_details.cache_read",
@@ -231,7 +232,7 @@ ATTRIBUTE_SPECS = (
         field=SpanAttributeField.PROMPT_CACHE_WRITE_TOKENS,
         bag=AttributeBag.NUMBER,
         bag_key="llm.token_count.prompt_details.cache_write",
-        source_keys=("llm.token_count.prompt_details.cache_write",),
+        source_keys=("gen_ai.usage.cache_write.input_tokens", "llm.token_count.prompt_details.cache_write"),
     ),
     AttributeSpec(
         field=SpanAttributeField.PROMPT_AUDIO_TOKENS,

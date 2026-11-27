@@ -202,10 +202,78 @@ async def test_a_call_made_with_a_trial_token_is_recorded_in_the_trial() -> None
     assert attributes[SESSION_ID_ATTRIBUTE] == TRIAL.session
     assert attributes[TEST_CASE_NAME_ATTRIBUTE] == "hello"
     assert attributes[GATEWAY_CALL_ATTRIBUTE] is True
+    assert attributes["gen_ai.operation.name"] == "chat"
     assert attributes["gen_ai.usage.input_tokens"] == 120
     assert attributes["gen_ai.usage.output_tokens"] == 5
     assert attributes["gen_ai.request.model"] == "meta/llama-3.3-70b"
     assert attributes["nemo.virtual_model"] == "models/agent-model"
+
+
+@pytest.mark.parametrize(
+    ("path", "span_name", "body", "operation", "input_tokens", "output_tokens"),
+    [
+        (
+            "v1/embeddings",
+            "embeddings",
+            {"usage": {"prompt_tokens": 7, "total_tokens": 7}},
+            "embeddings",
+            7,
+            None,
+        ),
+        (
+            "v1/completions",
+            "completions",
+            {"usage": {"prompt_tokens": 7, "completion_tokens": 2}},
+            "text_completion",
+            7,
+            2,
+        ),
+        ("v1/systemone", "systemone", {"usage": {"input_tokens": 7, "output_tokens": 2}}, None, 7, 2),
+        ("v1/models", "other", {"data": []}, None, None, None),
+    ],
+)
+async def test_gateway_span_attributes_describe_the_observed_operation(
+    path: str,
+    span_name: str,
+    body: dict[str, Any],
+    operation: str | None,
+    input_tokens: int | None,
+    output_tokens: int | None,
+) -> None:
+    sink = Sink()
+    middleware = _middleware(_reader(TOKEN), sink)
+    ctx = _ctx({"authorization": f"Bearer {TOKEN}"}, path=path)
+
+    assert await _call(middleware, ctx, body) is body
+    assert middleware._recorder is not None
+    await middleware._recorder.flush()
+
+    [(_, span)] = _spans(sink.sent)
+    attributes = _attributes(span)
+    assert span.name == attributes["nemo.inference.api"] == span_name
+    assert attributes.get("gen_ai.operation.name") == operation
+    assert attributes.get("gen_ai.usage.input_tokens") == input_tokens
+    assert attributes.get("gen_ai.usage.output_tokens") == output_tokens
+
+
+async def test_gateway_span_uses_the_forwarded_operation_after_a_request_rewrite() -> None:
+    sink = Sink()
+    middleware = _middleware(_reader(TOKEN), sink)
+    ctx = _ctx({"authorization": f"Bearer {TOKEN}"}, path="v1/systemone")
+    assert ctx.proxied_request is not None
+    ctx.proxied_request.path = "v1/chat/completions"
+    body = {"choices": [], "usage": {"prompt_tokens": 7, "completion_tokens": 2}}
+
+    assert await _call(middleware, ctx, body) is body
+    assert middleware._recorder is not None
+    await middleware._recorder.flush()
+
+    [(_, span)] = _spans(sink.sent)
+    attributes = _attributes(span)
+    assert span.name == attributes["nemo.inference.api"] == "systemone"
+    assert attributes["gen_ai.operation.name"] == "chat"
+    assert attributes["gen_ai.usage.input_tokens"] == 7
+    assert attributes["gen_ai.usage.output_tokens"] == 2
 
 
 async def test_a_call_is_recorded_with_the_model_name_its_provider_reported() -> None:
@@ -297,7 +365,10 @@ async def test_a_streamed_call_is_recorded_with_its_usage_once_the_caller_has_it
     chunks = [
         {
             "type": "message_start",
-            "message": {"model": "routed-target", "usage": {"input_tokens": 10, "cache_read_input_tokens": 30}},
+            "message": {
+                "model": "routed-target",
+                "usage": {"input_tokens": 10, "cache_read_input_tokens": 30, "cache_creation_input_tokens": 5},
+            },
         },
         {"type": "message_delta", "usage": {"output_tokens": 15}},
     ]
@@ -311,7 +382,13 @@ async def test_a_streamed_call_is_recorded_with_its_usage_once_the_caller_has_it
     [(_, span)] = _spans(sink.sent)
     attributes = _attributes(span)
     assert span.name == "messages"
-    assert attributes["gen_ai.usage.input_tokens"] == 40
+    assert attributes["gen_ai.usage.input_tokens"] == 45
+    assert attributes["gen_ai.usage.cache_read.input_tokens"] == attributes["gen_ai.usage.cached_tokens"] == 30
+    assert (
+        attributes["gen_ai.usage.cache_write.input_tokens"]
+        == attributes["llm.token_count.prompt_details.cache_write"]
+        == 5
+    )
     assert attributes["gen_ai.usage.output_tokens"] == 15
     assert attributes["gen_ai.response.model"] == "routed-target"
     assert "status" not in attributes
@@ -388,6 +465,7 @@ async def test_a_call_to_a_router_that_calls_back_as_the_trial_is_a_routing_span
     attributes = _attributes(span)
     assert forwarded.headers["traceparent"] == f"00-{trial_trace_id(TRIAL)}-{span.span_id.hex()}-01"
     assert attributes[OPENINFERENCE_SPAN_KIND] == "CHAIN"
+    assert "gen_ai.operation.name" not in attributes
     assert GATEWAY_CALL_ATTRIBUTE not in attributes
     assert span.parent_span_id.hex() == trial_root_span_id(TRIAL)
 

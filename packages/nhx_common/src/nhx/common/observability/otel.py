@@ -45,6 +45,7 @@ class OTELSettings(BaseSettings):
     otel_metrics_exporter: str = "none"
     otel_traces_exporter: str = "none"
     otel_logs_exporter: str = "none"
+    otel_python_log_auto_instrumentation: bool = True
     otel_exporter_otlp_traces_endpoint: str | None = None
     otel_exporter_otlp_metrics_endpoint: str | None = None
     otel_exporter_otlp_logs_endpoint: str | None = None
@@ -160,7 +161,6 @@ _REEXPORT_MAP: dict[str, tuple[str, str]] = {
     "DiscardSensitiveMessages": (".structured_logging", "DiscardSensitiveMessages"),
     "apply_extra_log_config": (".structured_logging", "apply_extra_log_config"),
     "clear_loggers": (".structured_logging", "clear_loggers"),
-    "create_otel_log_processor": (".structured_logging", "create_otel_log_processor"),
     "initialize_logging": (".structured_logging", "initialize_logging"),
     "quiet_loggers": (".structured_logging", "quiet_loggers"),
     "RequestLoggingMiddleware": (".middleware", "RequestLoggingMiddleware"),
