@@ -189,7 +189,3 @@ def test_cli_overrides_label_the_backend(monkeypatch: pytest.MonkeyPatch) -> Non
 
     apply_unsloth_job_cli_overrides(typer.Typer())
     assert captured["backend"] == "unsloth"
-
-
-def test_aalgo_1314_canary_must_fail() -> None:
-    assert False, "throwaway AALGO-1314 canary: proves a failing unit test turns CI red"
