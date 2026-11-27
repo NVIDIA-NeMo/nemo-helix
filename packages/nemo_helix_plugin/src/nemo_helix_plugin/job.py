@@ -67,7 +67,6 @@ from __future__ import annotations
 
 import logging
 from abc import abstractmethod
-from types import UnionType
 from typing import Any, ClassVar
 
 from nemo_helix_plugin._base import _NamedPlugin
@@ -180,15 +179,11 @@ class NemoJob(_NamedPlugin):
     spec_schema: ClassVar[type[BaseModel] | None] = None
     input_spec_schema: ClassVar[type[BaseModel] | None] = None
     #: What the job routes store and return, when it differs from ``spec_schema``. Requires
-    #: ``input_spec_schema``. ``to_spec`` and ``compile`` still see ``spec_schema``; a union lets a
-    #: job keep rendering the records it stored before its stored shape changed. It must also accept
-    #: the canonical spec: a dry run shows that spec, since it stores nothing, and jobs created before
-    #: a job type overrides ``store_spec`` keep it.
-    stored_spec_schema: ClassVar[type[BaseModel] | UnionType | None] = None
-    #: Whether ``PATCH`` may replace a job's spec. A job whose stored spec points at inputs frozen
-    #: at submission turns this off, so each job keeps the one definition it was accepted with. A job
-    #: that overrides :meth:`store_spec` must turn it off, since an update stores its spec as is.
-    allow_spec_update: ClassVar[bool] = True
+    #: ``input_spec_schema``. ``to_spec`` and ``compile`` still see ``spec_schema``. A job type that sets
+    #: it stores each new job's spec through :meth:`store_spec`, and refuses spec updates, since an
+    #: update would store a canonical spec as is. It must also accept the canonical spec: a dry run
+    #: shows that spec, since it stores nothing, and jobs created before the job type set it keep it.
+    stored_spec_schema: ClassVar[type[BaseModel] | None] = None
 
     # ------------------------------------------------------------------ #
     # API routes                                                         #
@@ -366,21 +361,21 @@ class NemoJob(_NamedPlugin):
         spec: BaseModel,
         *,
         workspace: str,
-        job_name: str,
+        job_name: str | None,
         async_sdk: AsyncNemoClient,
     ) -> StoredJobSpec | None:
         """The spec a new job stores, when it isn't ``spec`` itself.
 
-        The job route calls this on a create, after :meth:`to_spec` and :meth:`compile`, and never on a dry
-        run. Override it to keep part of a large spec out of the job record, such as in a file the job reads
-        back when it runs. The stored spec must validate against :attr:`stored_spec_schema`, and the job still
-        runs what :meth:`compile` compiled from ``spec``. A job that overrides this must set
-        :attr:`allow_spec_update` to ``False``.
+        The job route calls this on a create for a job type that sets :attr:`stored_spec_schema`, after
+        :meth:`to_spec` and :meth:`compile`, and never on a dry run. Override it to keep part of a large spec out
+        of the job record, such as in a file the job reads back when it runs. The stored spec is an instance of
+        :attr:`stored_spec_schema`, and the job still runs what :meth:`compile` compiled from ``spec``.
 
         Args:
             spec: Canonical :attr:`spec_schema` instance, as :meth:`compile` received it.
             workspace: Workspace scope.
-            job_name: The new job's name. The route names a job submitted without one before calling this.
+            job_name: The new job's name, or ``None`` when it was submitted without one and the Jobs service
+                will name it.
             async_sdk: The request-scoped :class:`AsyncNemoClient`.
 
         Returns:

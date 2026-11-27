@@ -13,14 +13,12 @@ from unittest.mock import MagicMock
 
 import httpx
 import pytest
-from fastapi import HTTPException
 from nemo_evals.jobs import agent_compiler
 from nemo_evals.jobs import attempt_tasks as attempt_tasks_module
 from nemo_evals.jobs.agent_compiler import compile_agent_eval_job
 from nemo_evals.jobs.agent_evaluate import AgentEvalJob, AsyncAgentEvalJob
-from nemo_evals.jobs.agent_spec import AgentEvalOutputSpec, AgentEvalSpec, FrozenTasks
+from nemo_evals.jobs.agent_spec import AgentEvalOutputSpec, AgentEvalSpec
 from nemo_evals.jobs.attempt_tasks import (
-    FROZEN_TASKS_KEY,
     FROZEN_TASKS_PATH,
     TASK_SERVICE_NAME,
     TASKS_DIGEST_KEY,
@@ -30,7 +28,6 @@ from nemo_evals.jobs.attempt_tasks import (
     freeze_tasks_in_file,
     frozen_tasks_bytes,
     frozen_tasks_digest,
-    frozen_tasks_fileset_name,
     load_attempt_tasks,
     step_config_without_tasks,
 )
@@ -43,17 +40,16 @@ from nemo_evals.jobs.harbor_task_spec import (
 )
 from nemo_evals.sdk.job_resources import AgentEvaluatorJob
 from nemo_evals.taskset_runs.plan_storage import (
-    PlanFilesetExistsError,
     PlanStorageError,
     PlanStoragePermissionDeniedError,
     StoredPlan,
 )
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.client.errors import PermissionDeniedError
-from nemo_helix_plugin.entity_naming import NAME_PATTERN
 from nemo_helix_plugin.job_context import JobContext
 from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError
 from nemo_helix_plugin.jobs.types import HelixJobAttemptResponse, HelixJobSpec, HelixJobStatus
+from nhx_evals_sdk.agent_eval.trials import AgentEvalTrial, AgentEvalTrialStatus, AgentOutput
 
 BASE = "http://platform.test"
 JOB = "eval-job"
@@ -313,14 +309,15 @@ FILE_PATH = f"/apis/files/v2/workspaces/default/filesets/{FILESET}/-/{FROZEN_TAS
 class _FrozenPlatform:
     """Serves one attempt whose spec names a frozen-tasks file, and the file itself."""
 
-    def __init__(self, attempt: dict, file_body: bytes | None) -> None:
+    def __init__(self, attempt: dict, file_body: bytes | None, *, file_path: str = FILE_PATH) -> None:
         self.attempt = attempt
         self.file_body = file_body
+        self.file_path = file_path
         self.paths: list[str] = []
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
         self.paths.append(request.url.path)
-        if request.url.path == FILE_PATH:
+        if request.url.path == self.file_path:
             if self.file_body is None:
                 return httpx.Response(404, json={"detail": "no such file"}, request=request)
             return httpx.Response(200, content=self.file_body, request=request)
@@ -340,11 +337,7 @@ def _frozen(spec: dict, *, ref: str = FILE_REF) -> tuple[dict, bytes]:
     body = frozen_tasks_bytes(spec)
     stored = {key: value for key, value in spec.items() if key not in ("tasks", "trials")}
     stored["task_count"] = len(spec["tasks"])
-    stored[FROZEN_TASKS_KEY] = {
-        "plan_ref": ref,
-        "plan_digest": hashlib.sha256(body).hexdigest(),
-        "trial_count": None if spec.get("trials") is None else len(spec["trials"]),
-    }
+    stored["frozen_tasks"] = {"ref": ref, "digest": hashlib.sha256(body).hexdigest()}
     return stored, body
 
 
@@ -361,25 +354,37 @@ def test_a_job_stored_with_its_tasks_in_a_file_gets_them_back_from_that_file(
     assert AgentEvalSpec.model_validate(restored) == harbor_spec
 
 
-def test_a_job_stored_with_its_tasks_in_a_file_replies_without_them(harbor_spec: AgentEvalSpec) -> None:
-    stored, _ = _frozen(harbor_spec.model_dump(mode="json"))
+def test_a_job_stored_with_its_tasks_in_a_file_replies_with_their_count_and_the_file(
+    harbor_spec: AgentEvalSpec,
+) -> None:
+    stored, body = _frozen(harbor_spec.model_dump(mode="json"))
 
     reply = AgentEvalOutputSpec.model_validate(stored).model_dump(mode="json")
 
     assert "tasks" not in reply  # omitted, not null
     assert reply["task_count"] == len(harbor_spec.tasks)
-    assert FROZEN_TASKS_KEY not in reply  # the service's own pointer never reaches a reply
+    # The fileset's name is random, so the reply is where a user finds the file.
+    assert reply["frozen_tasks"] == {"ref": FILE_REF, "digest": hashlib.sha256(body).hexdigest()}
 
 
 def test_a_job_stored_with_its_tasks_inline_replies_with_them_alone(harbor_spec: AgentEvalSpec) -> None:
-    stored = harbor_spec.model_dump(mode="json")
-    stored["task_count"] = 99  # a count beside the list could only disagree with it
-
-    reply = AgentEvalOutputSpec.model_validate(stored).model_dump(mode="json")
+    reply = AgentEvalOutputSpec.model_validate(harbor_spec.model_dump(mode="json")).model_dump(mode="json")
 
     assert reply["tasks"] == harbor_spec.model_dump(mode="json")["tasks"]
-    # Clients from before `task_count` existed refuse unknown fields, so a reply with tasks doesn't carry it.
-    assert "task_count" not in reply
+    # Clients from before these fields existed refuse unknown fields, so a reply with tasks carries neither.
+    assert "task_count" not in reply and "frozen_tasks" not in reply
+
+
+@pytest.mark.parametrize("shown", ["both", "neither"])
+def test_a_stored_spec_carries_its_tasks_or_their_count(harbor_spec: AgentEvalSpec, shown: str) -> None:
+    stored, _ = _frozen(harbor_spec.model_dump(mode="json"))
+    if shown == "both":
+        stored["tasks"] = harbor_spec.model_dump(mode="json")["tasks"]
+    else:
+        del stored["task_count"]
+
+    with pytest.raises(ValueError, match="exactly one of `tasks` or `task_count`"):
+        AgentEvalOutputSpec.model_validate(stored)
 
 
 @pytest.mark.parametrize("online", [True, False], ids=["online", "offline"])
@@ -391,7 +396,7 @@ def test_a_reply_without_its_tasks_parses_back(harbor_spec: AgentEvalSpec, onlin
 
     reply = AgentEvalOutputSpec.model_validate(stored).model_dump(mode="json")
 
-    # A reply omits the pointer, and an offline job's trials with it; the SDK parses replies with this model.
+    # An offline job's reply shows neither `target` nor `trials`; the SDK parses replies with this model.
     assert AgentEvalOutputSpec.model_validate(reply).task_count == len(harbor_spec.tasks)
     job = AgentEvaluatorJob.model_validate({"name": JOB, "workspace": "default", "spec": reply})
     assert job.spec.task_count == len(harbor_spec.tasks)
@@ -399,18 +404,18 @@ def test_a_reply_without_its_tasks_parses_back(harbor_spec: AgentEvalSpec, onlin
 
 def test_a_stored_spec_with_fields_from_a_later_release_still_renders(harbor_spec: AgentEvalSpec) -> None:
     stored, _ = _frozen(harbor_spec.model_dump(mode="json"))
-    stored[FROZEN_TASKS_KEY]["fileset_id"] = "fileset-1"
+    stored["frozen_tasks"]["fileset_id"] = "fileset-1"
     stored["added_later"] = True
 
     reply = AgentEvalOutputSpec.model_validate(stored).model_dump(mode="json")
 
     assert reply["task_count"] == len(harbor_spec.tasks)
-    assert "added_later" not in reply
+    assert "added_later" not in reply and "fileset_id" not in reply["frozen_tasks"]
 
 
 def test_a_null_pointer_leaves_the_tasks_inline(harbor_spec: AgentEvalSpec) -> None:
     stored, compiled, config = _stored_and_compiled(harbor_spec)
-    stored[FROZEN_TASKS_KEY] = None
+    stored["frozen_tasks"] = None
     platform = _Platform(_attempt_body(stored, compiled))
 
     restored = load_attempt_tasks(config, ctx=_ctx(), client=platform.sync_client())
@@ -431,18 +436,6 @@ def test_an_offline_jobs_trials_come_back_from_the_file_too(harbor_spec: AgentEv
     assert restored["tasks"] == spec["tasks"] and restored["trials"] == spec["trials"]
 
 
-@pytest.mark.parametrize(("online", "trial_count"), [(True, 2), (False, None)], ids=["both", "neither"])
-def test_a_stored_spec_needs_exactly_one_trial_source(
-    harbor_spec: AgentEvalSpec, online: bool, trial_count: int | None
-) -> None:
-    stored, _ = _frozen(harbor_spec.model_dump(mode="json"))
-    stored[FROZEN_TASKS_KEY]["trial_count"] = trial_count
-    if not online:
-        stored["target"] = None
-    with pytest.raises(ValueError, match="exactly one of `target` or trials"):
-        AgentEvalOutputSpec.model_validate(stored)
-
-
 def test_a_frozen_tasks_file_that_changed_is_refused(harbor_spec: AgentEvalSpec) -> None:
     _, compiled, config = _stored_and_compiled(harbor_spec)
     stored, body = _frozen(harbor_spec.model_dump(mode="json"))
@@ -459,28 +452,31 @@ def test_a_missing_frozen_tasks_file_fails_the_run(harbor_spec: AgentEvalSpec) -
         load_attempt_tasks(config, ctx=_ctx(), client=platform.sync_client())
 
 
-@pytest.mark.parametrize(
-    ("ref", "message"),
-    [
-        (f"elsewhere/{FILESET}#{FROZEN_TASKS_PATH}", "must be 'tasks.json' in workspace 'default'"),
-        (f"default/{FILESET}#other.json", "must be 'tasks.json' in workspace 'default'"),
-    ],
-)
-def test_a_frozen_tasks_file_outside_the_jobs_workspace_is_refused(
-    harbor_spec: AgentEvalSpec, ref: str, message: str
-) -> None:
+def test_a_frozen_tasks_file_outside_the_jobs_workspace_is_refused(harbor_spec: AgentEvalSpec) -> None:
     _, compiled, config = _stored_and_compiled(harbor_spec)
-    stored, body = _frozen(harbor_spec.model_dump(mode="json"), ref=ref)
+    stored, body = _frozen(harbor_spec.model_dump(mode="json"), ref=f"elsewhere/{FILESET}#{FROZEN_TASKS_PATH}")
     platform = _FrozenPlatform(_attempt_body(stored, compiled), body)
-    with pytest.raises(AttemptTasksError, match=message):
+    with pytest.raises(AttemptTasksError, match="is outside workspace 'default'"):
         load_attempt_tasks(config, ctx=_ctx(), client=platform.sync_client())
     assert FILE_PATH not in platform.paths
+
+
+def test_a_frozen_tasks_file_at_another_path_is_read_by_its_digest(harbor_spec: AgentEvalSpec) -> None:
+    # The digest binds the bytes, so a later release may store the file elsewhere in the workspace.
+    _, compiled, config = _stored_and_compiled(harbor_spec)
+    stored, body = _frozen(harbor_spec.model_dump(mode="json"), ref=f"default/{FILESET}#frozen/other.json")
+    other_path = f"/apis/files/v2/workspaces/default/filesets/{FILESET}/-/frozen/other.json"
+    platform = _FrozenPlatform(_attempt_body(stored, compiled), body, file_path=other_path)
+
+    restored = load_attempt_tasks(config, ctx=_ctx(), client=platform.sync_client())
+
+    assert AgentEvalSpec.model_validate(restored) == harbor_spec
 
 
 def test_a_stored_digest_that_differs_from_the_step_config_is_refused(harbor_spec: AgentEvalSpec) -> None:
     _, compiled, config = _stored_and_compiled(harbor_spec)
     stored, body = _frozen(harbor_spec.model_dump(mode="json"))
-    stored[FROZEN_TASKS_KEY]["plan_digest"] = "f" * 64
+    stored["frozen_tasks"]["digest"] = "f" * 64
     platform = _FrozenPlatform(_attempt_body(stored, compiled), body)
     with pytest.raises(AttemptTasksError, match="digest .* doesn't match its step config"):
         load_attempt_tasks(config, ctx=_ctx(), client=platform.sync_client())
@@ -488,24 +484,38 @@ def test_a_stored_digest_that_differs_from_the_step_config_is_refused(harbor_spe
 
 
 @pytest.mark.parametrize(
-    "pointer",
+    ("key", "value"),
     [
-        {"plan_digest": "f" * 64},
-        {"plan_ref": f"default/{FILESET}#{FROZEN_TASKS_PATH}", "plan_digest": "not-a-digest"},
-        f"default/{FILESET}#{FROZEN_TASKS_PATH}",
+        ("frozen_tasks", {"digest": "f" * 64}),
+        ("frozen_tasks", {"ref": f"default/{FILESET}#{FROZEN_TASKS_PATH}", "digest": "not-a-digest"}),
+        ("frozen_tasks", f"default/{FILESET}#{FROZEN_TASKS_PATH}"),
+        ("tasks", "not a list"),
     ],
-    ids=["no file", "malformed digest", "not an object"],
+    ids=["no file", "malformed digest", "not an object", "tasks not a list"],
 )
-def test_a_frozen_tasks_pointer_without_a_file_and_digest_is_refused(
-    harbor_spec: AgentEvalSpec, pointer: object
+def test_an_attempt_spec_without_its_tasks_or_a_file_and_digest_is_refused(
+    harbor_spec: AgentEvalSpec, key: str, value: object
 ) -> None:
     _, compiled, config = _stored_and_compiled(harbor_spec)
     stored, body = _frozen(harbor_spec.model_dump(mode="json"))
-    stored[FROZEN_TASKS_KEY] = pointer
+    if key == "tasks":
+        stored["frozen_tasks"] = None
+    stored[key] = value
     platform = _FrozenPlatform(_attempt_body(stored, compiled), body)
-    with pytest.raises(AttemptTasksError, match="doesn't name a file and its digest"):
+    with pytest.raises(AttemptTasksError, match="has neither a task list nor a tasks file's ref and digest"):
         load_attempt_tasks(config, ctx=_ctx(), client=platform.sync_client())
     assert FILE_PATH not in platform.paths
+
+
+def test_a_frozen_tasks_file_without_a_task_list_is_refused(harbor_spec: AgentEvalSpec) -> None:
+    _, compiled, config = _stored_and_compiled(harbor_spec)
+    stored, _ = _frozen(harbor_spec.model_dump(mode="json"))
+    body = b'{"trials": null}'
+    stored["frozen_tasks"]["digest"] = hashlib.sha256(body).hexdigest()
+    config = {**config, TASKS_DIGEST_KEY: "sha256-v1:" + stored["frozen_tasks"]["digest"]}
+    platform = _FrozenPlatform(_attempt_body(stored, compiled), body)
+    with pytest.raises(AttemptTasksError, match="doesn't hold a task list"):
+        load_attempt_tasks(config, ctx=_ctx(), client=platform.sync_client())
 
 
 def test_the_file_bytes_hash_to_the_step_config_digest(harbor_spec: AgentEvalSpec) -> None:
@@ -516,49 +526,57 @@ def test_the_file_bytes_hash_to_the_step_config_digest(harbor_spec: AgentEvalSpe
 # --- Freezing a new job's tasks in a file ----------------------------------------------------------------
 
 
-def test_a_job_name_that_fits_names_its_tasks_fileset_as_is() -> None:
-    assert frozen_tasks_fileset_name("golden-run", "default") == "job-tasks-golden-run"
-
-
-def test_a_long_job_name_is_shortened_to_a_fileset_name_that_stays_its_own() -> None:
-    longest = "a" * 63
-
-    name = frozen_tasks_fileset_name(longest, "default")
-
-    assert name.startswith("job-tasks-a") and re.fullmatch(NAME_PATTERN, name)
-    assert name == frozen_tasks_fileset_name(longest, "default")
-    assert name != frozen_tasks_fileset_name("a" * 62 + "b", "default")
+def _offline(spec: AgentEvalSpec) -> AgentEvalSpec:
+    """``spec`` scoring one precomputed trial per task instead of running its target."""
+    trials = [
+        AgentEvalTrial(
+            id=f"trial-{task.id}",
+            task_id=task.id,
+            status=AgentEvalTrialStatus.COMPLETED,
+            output=AgentOutput(output_text="done"),
+        )
+        for task in spec.tasks
+    ]
+    return AgentEvalSpec(tasks=spec.tasks, trials=trials)
 
 
 @pytest.mark.parametrize("online", [True, False], ids=["online", "offline"])
-async def test_freezing_stores_the_settings_the_count_and_a_pointer_the_step_config_binds(
-    harbor_spec: AgentEvalSpec, online: bool, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("job_name", [JOB, None], ids=["named", "unnamed"])
+async def test_freezing_stores_the_settings_the_count_and_the_file_the_step_config_binds(
+    harbor_spec: AgentEvalSpec, online: bool, job_name: str | None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    spec = harbor_spec.model_dump(mode="json")
-    if not online:
-        spec = {"target": None, "tasks": spec["tasks"], "trials": [{"id": "trial", "task_id": "t"}], "labels": {}}
-    written: dict[str, Any] = {}
+    spec = harbor_spec if online else _offline(harbor_spec)
+    canonical = spec.model_dump(mode="json")
+    written: list[dict[str, Any]] = []
 
     async def store(files_client: object, **kwargs: Any) -> StoredPlan:
         del files_client
-        written.update(kwargs)
+        written.append(kwargs)
         ref = f"{kwargs['workspace']}/{kwargs['name']}#{kwargs['path']}"
         return StoredPlan(ref=ref, digest=hashlib.sha256(kwargs["body"]).hexdigest(), fileset_id="fileset-1")
 
     monkeypatch.setattr(attempt_tasks_module, "store_in_new_fileset", store)
     async with AsyncNemoClient(base_url=BASE, workspace="default") as client:
-        stored = await freeze_tasks_in_file(spec, workspace="default", job_name=JOB, async_client=client)
+        stored = await freeze_tasks_in_file(spec, workspace="default", job_name=job_name, async_client=client)
+        again = await freeze_tasks_in_file(spec, workspace="default", job_name=job_name, async_client=client)
 
-    assert (written["name"], written["path"]) == (f"job-tasks-{JOB}", FROZEN_TASKS_PATH)
-    assert written["body"] == frozen_tasks_bytes(spec)
-    expected, _ = _frozen(spec, ref=f"default/job-tasks-{JOB}#{FROZEN_TASKS_PATH}")
-    pointer = stored.spec.pop(FROZEN_TASKS_KEY)
-    assert FrozenTasks.model_validate(pointer) == FrozenTasks.model_validate(expected.pop(FROZEN_TASKS_KEY))
-    assert stored.spec == expected
-    assert "sha256-v1:" + pointer["plan_digest"] == frozen_tasks_digest(spec)
-    assert AgentEvalOutputSpec.model_validate({**stored.spec, FROZEN_TASKS_KEY: pointer}).task_count == len(
-        harbor_spec.tasks
-    )
+    [first, second] = written
+    assert re.fullmatch(r"job-tasks-[0-9a-f]{16}", first["name"]) and first["name"] != second["name"]
+    assert first["path"] == FROZEN_TASKS_PATH
+    assert first["body"] == frozen_tasks_bytes(canonical)
+    job = f"agent-evaluate job default/{JOB}" if job_name is not None else "an agent-evaluate job in default"
+    assert first["description"] == f"Tasks frozen for {job}."
+    assert isinstance(stored.spec, AgentEvalOutputSpec)
+    shown = stored.spec.model_dump(mode="json")
+    digest = hashlib.sha256(first["body"]).hexdigest()
+    assert shown == {
+        **{key: value for key, value in canonical.items() if key != "tasks"},
+        "trials": None,
+        "task_count": len(spec.tasks),
+        "frozen_tasks": {"ref": f"default/{first['name']}#{FROZEN_TASKS_PATH}", "digest": digest},
+    }
+    assert "sha256-v1:" + digest == frozen_tasks_digest(canonical)
+    assert again.spec.model_dump(mode="json")["frozen_tasks"]["ref"] != shown["frozen_tasks"]["ref"]
 
 
 def _denied() -> PlanStoragePermissionDeniedError:
@@ -569,11 +587,10 @@ def _denied() -> PlanStoragePermissionDeniedError:
 @pytest.mark.parametrize(
     ("failure", "raised"),
     [
-        (PlanFilesetExistsError("the fileset exists"), HTTPException),  # the route answers 409
         (_denied(), PermissionError),  # the route answers 403
         (PlanStorageError("files are down"), PlanStorageError),  # the route answers 422
     ],
-    ids=["exists", "denied", "failed"],
+    ids=["denied", "failed"],
 )
 async def test_a_job_whose_tasks_cannot_be_frozen_gives_back_the_agents_files(
     harbor_spec: AgentEvalSpec,
@@ -598,8 +615,7 @@ async def test_a_job_whose_tasks_cannot_be_frozen_gives_back_the_agents_files(
 
     # No job will own the registered agent's files snapshot that resolution took.
     assert discarded == [harbor_spec.target]
-    if isinstance(caught.value, HTTPException):
-        assert caught.value.status_code == 409
+    assert isinstance(caught.value, raised)
 
 
 # --- Taskset-run task Jobs ---------------------------------------------------------------------------------

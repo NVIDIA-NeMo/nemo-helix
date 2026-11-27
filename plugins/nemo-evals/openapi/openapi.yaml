@@ -3856,13 +3856,18 @@ components:
             the job keeps its tasks outside its record.
           type: integer
           minimum: 1.0
+        frozen_tasks:
+          allOf:
+          - $ref: '#/components/schemas/FrozenTasksRef'
+          description: The file that holds the job's tasks and trials, set when the
+            job keeps them outside its record. Helix doesn't delete it.
       type: object
       title: AgentEvalOutputSpec
       description: 'An agent evaluation as its job stores and returns it.
 
 
-        It holds the resolved tasks, or, for a job that keeps them in a file, only
-        their count.'
+        It holds the resolved tasks, or, for a job that keeps them in a file, their
+        count and that file.'
     AgentEvalResult:
       properties:
         id:
@@ -5789,6 +5794,25 @@ components:
       title: FilesetTaskSource
       description: A Gym jsonl dataset file in a FileSet, converted into tasks at
         submission, optionally published first.
+    FrozenTasksRef:
+      properties:
+        ref:
+          type: string
+          minLength: 1
+          title: Ref
+          description: The file, as `<workspace>/<fileset>#tasks.json`.
+        digest:
+          type: string
+          pattern: ^[0-9a-f]{64}$
+          title: Digest
+          description: SHA-256 of the file's exact bytes, in hex.
+      type: object
+      required:
+      - ref
+      - digest
+      title: FrozenTasksRef
+      description: The file a job keeps its resolved tasks and trials in, and the
+        SHA-256 of its exact bytes.
     GenericAgent:
       properties:
         url:

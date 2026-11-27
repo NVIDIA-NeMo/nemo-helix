@@ -15,7 +15,7 @@ from hashlib import sha256
 from filesets import parse_fileset_ref
 from nemo_evals.schema_migrations import migrate_schema_fileset_receipt
 from nemo_evals.taskset_runs.specs import TasksetRunPlan
-from nemo_helix_plugin.client.errors import ConflictError, PermissionDeniedError
+from nemo_helix_plugin.client.errors import PermissionDeniedError
 from nemo_helix_plugin.files.client import AsyncFilesClient, FilesClient
 from nemo_helix_plugin.files.types import CreateFilesetRequest
 
@@ -24,10 +24,6 @@ logger = logging.getLogger(__name__)
 
 class PlanStorageError(RuntimeError):
     """A plan write failed; its chained cause preserves the original Files error."""
-
-
-class PlanFilesetExistsError(PlanStorageError):
-    """The fileset a file was to be stored in already exists, so nothing was written."""
 
 
 class PlanStoragePermissionDeniedError(PlanStorageError):
@@ -133,7 +129,6 @@ async def store_in_new_fileset(
         what: What the file holds, for error messages, such as ``"plan"``.
 
     Raises:
-        PlanFilesetExistsError: A fileset named ``name`` already exists.
         PlanStoragePermissionDeniedError: Files refused fileset creation or upload.
         PlanStorageError: Fileset creation or upload failed, with the original
             error retained as its cause even when rollback also fails.
@@ -149,8 +144,6 @@ async def store_in_new_fileset(
         ).data()
     except PermissionDeniedError as exc:
         raise PlanStoragePermissionDeniedError(f"failed to create {what} fileset {workspace}/{name}", exc) from exc
-    except ConflictError as exc:
-        raise PlanFilesetExistsError(f"{what} fileset {workspace}/{name} already exists") from exc
     except Exception as exc:
         raise PlanStorageError(f"failed to create {what} fileset {workspace}/{name}") from exc
     try:

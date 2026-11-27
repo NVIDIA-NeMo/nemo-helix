@@ -26,7 +26,6 @@ from nemo_evals.api.service.task_service import stored_evaluator_task_digest
 from nemo_evals.jobs.agent_evaluate import AgentEvalJob
 from nemo_evals.jobs.agent_spec import AgentEvalInputSpec, AgentEvalSpec
 from nemo_evals.jobs.attempt_tasks import (
-    FROZEN_TASKS_KEY,
     FROZEN_TASKS_PATH,
     TASKS_DIGEST_KEY,
     TASKS_FROM_KEY,
@@ -36,7 +35,6 @@ from nemo_evals.jobs.fileset_tasks import gym_reward_metric
 from nemo_evals.sdk.job_resources import AgentEvaluatorJob
 from nemo_evals.sdk.resources import Evaluator
 from nemo_evals.service import EvaluatorPluginService
-from nemo_helix_plugin.client.errors import NotFoundError
 from nemo_helix_plugin.dependencies import get_submission_authorizer
 from nemo_helix_plugin.files.client import FilesClient
 from nemo_helix_plugin.files.types import CreateFilesetRequest
@@ -120,15 +118,16 @@ def _frozen_spec(ctx: ClientContext, name: str) -> AgentEvalSpec:
     shown = job.raise_for_status().json()["spec"]
     assert shown.pop("tasks", None) is None
     assert shown.pop("task_count") >= 1
+    assert shown.pop("frozen_tasks")["ref"]
     return AgentEvalSpec.model_validate({**shown, **json.loads(_frozen_file(ctx, name))})
 
 
 def _frozen_file(ctx: ClientContext, name: str) -> bytes:
     """The bytes of the file job ``name`` keeps its tasks in, checked against the digest its record holds."""
-    pointer = JobsClient.from_client(ctx.client).get_job(name=name, workspace="default").data().spec[FROZEN_TASKS_KEY]
-    workspace, fileset, path = parse_fileset_ref(pointer["plan_ref"], workspace_fallback=None)
+    pointer = JobsClient.from_client(ctx.client).get_job(name=name, workspace="default").data().spec["frozen_tasks"]
+    workspace, fileset, path = parse_fileset_ref(pointer["ref"], workspace_fallback=None)
     body = FilesClient.from_client(ctx.client).download_file(workspace=workspace, name=fileset, path=path).read()
-    assert hashlib.sha256(body).hexdigest() == pointer["plan_digest"]
+    assert hashlib.sha256(body).hexdigest() == pointer["digest"]
     return body
 
 
@@ -230,7 +229,7 @@ def test_the_worker_loads_the_tasks_the_job_froze(ctx: ClientContext, snapshot: 
     frozen = json.loads(_frozen_file(ctx, response.json()["name"]))["tasks"]
     [attempt] = JobsClient.from_client(ctx.client).list_job_attempts(job=response.json()["name"]).items()
     assert attempt.platform_spec is not None
-    assert FROZEN_TASKS_KEY in attempt.spec and "tasks" not in attempt.spec  # the attempt holds only the pointer
+    assert "frozen_tasks" in attempt.spec and "tasks" not in attempt.spec  # the attempt holds only the pointer
     [config] = [step.config for step in attempt.platform_spec.steps if TASKS_FROM_KEY in step.config]
     job_ctx = MagicMock(spec=JobContext, workspace="default", job_id=attempt.job, attempt_id=attempt.id)
 
@@ -520,33 +519,35 @@ def _create(ctx: ClientContext, **fields: Any) -> Any:
     )
 
 
-def _fileset_exists(ctx: ClientContext, name: str) -> bool:
-    try:
-        FilesClient.from_client(ctx.client).get_fileset(workspace="default", name=name)
-    except NotFoundError:
-        return False
-    return True
+def _tasks_filesets(ctx: ClientContext) -> set[str]:
+    """The workspace's filesets that hold a job's frozen tasks."""
+    filesets = FilesClient.from_client(ctx.client).list_filesets(workspace="default")
+    return {fileset.name for fileset in filesets if fileset.name.startswith("job-tasks-")}
 
 
-def test_a_job_keeps_its_tasks_in_a_file_named_after_it(ctx: ClientContext) -> None:
+def _tasks_file(ctx: ClientContext, name: str) -> dict[str, Any]:
+    return JobsClient.from_client(ctx.client).get_job(name=name, workspace="default").data().spec["frozen_tasks"]
+
+
+def test_a_job_keeps_its_tasks_in_a_file_of_its_own(ctx: ClientContext) -> None:
     _upload(ctx, _row("q1"), _row("q2"))
 
     created = _create(ctx, name="golden-run")
 
     assert created.status_code < 300, created.text
     job = JobsClient.from_client(ctx.client).get_job(name="golden-run", workspace="default").data()
-    pointer = job.spec[FROZEN_TASKS_KEY]
-    assert pointer["plan_ref"] == f"default/job-tasks-golden-run#{FROZEN_TASKS_PATH}"
-    assert "tasks" not in job.spec and "trials" not in job.spec
+    pointer = job.spec["frozen_tasks"]
+    assert re.fullmatch(rf"default/job-tasks-[0-9a-f]{{16}}#{FROZEN_TASKS_PATH}", pointer["ref"])
+    assert "tasks" not in job.spec and job.spec.get("trials") is None
     assert job.spec["task_count"] == 2
     assert len(json.loads(_frozen_file(ctx, "golden-run"))["tasks"]) == 2
     # The step config's digest covers the file's exact bytes, so the worker can check one against the other.
     assert job.platform_spec is not None
     [config] = [step.config for step in job.platform_spec.steps if TASKS_FROM_KEY in step.config]
-    assert config[TASKS_DIGEST_KEY] == f"sha256-v1:{pointer['plan_digest']}"
+    assert config[TASKS_DIGEST_KEY] == f"sha256-v1:{pointer['digest']}"
 
 
-def test_replies_show_the_task_count_in_place_of_the_tasks(ctx: ClientContext) -> None:
+def test_replies_show_the_task_count_and_the_file_in_place_of_the_tasks(ctx: ClientContext) -> None:
     _upload(ctx, _row("q1"), _row("q2"))
     created = _create(ctx, name="golden-run")
     assert created.status_code < 300, created.text
@@ -560,40 +561,35 @@ def test_replies_show_the_task_count_in_place_of_the_tasks(ctx: ClientContext) -
     for shown in (created.json()["spec"], one.json()["spec"], *(job["spec"] for job in listed.json()["data"])):
         assert "tasks" not in shown  # omitted, not null: the schema allows only a list
         assert shown["task_count"] == 2
-        assert FROZEN_TASKS_KEY not in shown  # the service's own pointer never reaches a reply
+        # The fileset's name is random, so the reply is where a user finds the file.
+        assert shown["frozen_tasks"] == _tasks_file(ctx, "golden-run")
     # The SDK parses replies with the same model.
     assert AgentEvaluatorJob.model_validate(one.json()).spec.task_count == 2
 
 
-def test_an_unnamed_job_is_named_before_its_tasks_are_stored(ctx: ClientContext) -> None:
+def test_an_unnamed_job_keeps_its_tasks_in_a_file_too(ctx: ClientContext) -> None:
     _upload(ctx, _row("q1"))
 
     created = _create(ctx)
 
     assert created.status_code < 300, created.text
+    # The Jobs service names it, as it names any job submitted without a name.
     name = created.json()["name"]
-    # The name the Jobs service would have given it.
-    assert re.fullmatch(r"nemo-evals\.agent-eva-[0-9a-f]{8}", name)
-    assert _fileset_exists(ctx, f"job-tasks-{name}")
+    assert name.startswith("nemo-evals.agent-eva-")
+    _, fileset, _ = parse_fileset_ref(_tasks_file(ctx, name)["ref"], workspace_fallback=None)
+    assert _tasks_filesets(ctx) == {fileset}
 
 
-@pytest.mark.parametrize("taken_by", ["job", "fileset"])
-def test_a_name_whose_tasks_fileset_exists_is_refused(ctx: ClientContext, taken_by: str) -> None:
+def test_each_job_keeps_its_tasks_in_a_fileset_of_its_own(ctx: ClientContext) -> None:
     _upload(ctx, _row("q1"))
-    if taken_by == "job":
-        assert _create(ctx, name="golden-run").status_code < 300
-    else:
-        FilesClient.from_client(ctx.client).create_fileset(
-            workspace="default", body=CreateFilesetRequest(name="job-tasks-golden-run")
-        )
-    jobs_before = _jobs(ctx)
 
-    refused = _create(ctx, name="golden-run")
+    for name in ("golden-run", "silver-run"):
+        assert _create(ctx, name=name).status_code < 300
 
-    assert refused.status_code == 409, refused.text
-    assert refused.json()["detail"].startswith("Fileset default/job-tasks-golden-run already exists")
-    assert _jobs(ctx) == jobs_before
-    assert _fileset_exists(ctx, "job-tasks-golden-run")  # the refusal leaves it alone
+    refs = {_tasks_file(ctx, name)["ref"] for name in ("golden-run", "silver-run")}
+    assert len(refs) == 2
+    # The fileset's name doesn't come from the job's, so a name is free again once its job is gone.
+    assert {parse_fileset_ref(ref, workspace_fallback=None)[1] for ref in refs} == _tasks_filesets(ctx)
 
 
 def test_a_job_the_jobs_service_refuses_leaves_no_tasks_fileset(ctx: ClientContext) -> None:
@@ -602,5 +598,4 @@ def test_a_job_the_jobs_service_refuses_leaves_no_tasks_fileset(ctx: ClientConte
     refused = _create(ctx, name="golden-run", output_location="no-such-fileset")
 
     assert refused.status_code == 422, refused.text
-    assert not _fileset_exists(ctx, "job-tasks-golden-run")
-    assert _create(ctx, name="golden-run").status_code < 300  # so the name can be used again
+    assert _tasks_filesets(ctx) == set()

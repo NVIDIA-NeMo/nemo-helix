@@ -36,7 +36,6 @@ from nemo_evals.jobs.agent_spec import (
     HarborBuiltinAgentSource,
     HarborRunnerTarget,
 )
-from nemo_evals.jobs.attempt_tasks import FROZEN_TASKS_KEY
 from nemo_evals.sdk.resources import Evaluator
 from nemo_evals.shared.metric_bundles.bundles import bundle_metric
 from nemo_evals.shared.metric_bundles.inline import InlineMetricBundlePackager
@@ -54,9 +53,9 @@ pytestmark = [pytest.mark.integration]
 
 def _frozen_tasks(base_url: str, workspace: str, job_name: str) -> list[dict]:
     """The tasks job ``job_name`` keeps in its file, checked against its digest as its worker checks them."""
-    pointer = JobsClient(base_url=base_url, workspace=workspace).get_job(name=job_name).data().spec[FROZEN_TASKS_KEY]
+    pointer = JobsClient(base_url=base_url, workspace=workspace).get_job(name=job_name).data().spec["frozen_tasks"]
     files_client = FilesClient(base_url=base_url, workspace=workspace)
-    body = read_verified_bytes_sync(files_client, pointer["plan_ref"], expected_digest=pointer["plan_digest"])
+    body = read_verified_bytes_sync(files_client, pointer["ref"], expected_digest=pointer["digest"])
     return json.loads(body)["tasks"]
 
 

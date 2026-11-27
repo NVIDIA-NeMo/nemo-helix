@@ -96,21 +96,6 @@ def derive_job_fileset_name(job_name: str, workspace: str) -> str:
     return f"{JOB_FILESET_NAME_PREFIX}{safe_name_part}"
 
 
-_AUTO_NAME_SOURCE_MAX_LENGTH = 20
-_AUTO_NAME_FALLBACK_PREFIX = "job"
-
-
-def generate_job_name(source: str, short_id: str) -> str:
-    """Return ``{source prefix}-{short_id}``, valid both as a job name and inside ``job-fileset-{name}``.
-
-    The Jobs service names a job submitted without a name this way. A job route that needs the name before
-    the job exists names it the same way.
-    """
-    prefix = re.sub(r"[^a-z0-9@.+_]+", "-", source.lower())
-    prefix = re.sub(r"^[^a-z]+", "", prefix)[:_AUTO_NAME_SOURCE_MAX_LENGTH].rstrip("-")
-    return f"{prefix or _AUTO_NAME_FALLBACK_PREFIX}-{short_id}"
-
-
 # Root folder for job artifacts inside a caller-supplied ``output_location`` fileset, so a
 # fileset the caller also uses for their own files keeps job output in one predictable place.
 JOB_ARTIFACT_ROOT = "jobs"
@@ -267,15 +252,15 @@ class StoredJobSpec:
     """The spec a new job stores in place of its canonical spec (see ``NemoJob.store_spec``).
 
     Attributes:
-        spec: The JSON spec the job record stores. It must validate against the job's stored spec schema. When
-            storing wrote something outside the record, ``spec`` should bind it with a digest that the job's
-            reader checks before using it, as agent-evaluate's ``frozen_tasks.plan_digest`` does.
-        discard: Undoes what storing the spec wrote outside the record. The job route calls it when no job will
-            own those writes: the spec doesn't match the stored spec schema, or the Jobs service refuses the job
-            with a 4xx. A 5xx or a lost reply leaves the job's existence unknown, so the route doesn't call it.
+        spec: The spec the job record stores, an instance of the job's stored spec schema. When storing wrote
+            something outside the record, ``spec`` should bind it with a digest that the job's reader checks
+            before using it, as agent-evaluate's ``frozen_tasks.digest`` does.
+        discard: Undoes what storing the spec wrote outside the record. The job route calls it when the Jobs
+            service refuses the job with a 4xx, so no job will own those writes. A 5xx or a lost reply leaves the
+            job's existence unknown, so the route doesn't call it.
     """
 
-    spec: dict[str, Any]
+    spec: BaseModel
     discard: Callable[[], Awaitable[None]] | None = None
 
 

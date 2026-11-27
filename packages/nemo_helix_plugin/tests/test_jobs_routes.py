@@ -14,20 +14,24 @@ Keeping this module focused on the shim keeps it fast and stable.
 
 from __future__ import annotations
 
+from typing import cast
+
 import pytest
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 from fastapi.routing import APIRoute
+from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.job import NemoJob
-from nemo_helix_plugin.jobs.api_factory import JobRouteOption, handle_job_spec_mismatch
+from nemo_helix_plugin.jobs.api_factory import JobRouteOption
 from nemo_helix_plugin.jobs.routes import (
     _adapt_compile,
+    _adapt_store_spec,
     _adapt_to_spec,
     _derive_job_type,
     _derive_service_name,
     add_job_routes,
 )
 from nhx.common.jobs.exceptions import HelixJobCompilationError
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 
 # ---------------------------------------------------------------------------
 # Fixture jobs
@@ -545,7 +549,7 @@ class TestAddJobRoutes:
 
         class StoredJob(_WithInputJob):
             name = "stored"
-            stored_spec_schema = _StoredSpec | _CanonicalSpec
+            stored_spec_schema = _StoredSpec
 
         router = add_job_routes(StoredJob)
         [get_route] = [
@@ -555,7 +559,7 @@ class TestAddJobRoutes:
         ]
         response_model = get_route.response_model
         assert isinstance(response_model, type) and issubclass(response_model, BaseModel)
-        assert response_model.model_fields["spec"].annotation == _StoredSpec | _CanonicalSpec
+        assert response_model.model_fields["spec"].annotation == _StoredSpec
 
     def test_stored_spec_schema_requires_an_input_spec_schema(self) -> None:
         class StoredWithoutInputJob(_WidgetJob):
@@ -565,23 +569,24 @@ class TestAddJobRoutes:
         with pytest.raises(TypeError, match="requires input_spec_schema"):
             add_job_routes(StoredWithoutInputJob)
 
-    def test_a_job_that_stores_its_own_spec_must_refuse_spec_updates(self) -> None:
+    async def test_a_job_type_with_a_stored_spec_schema_stores_each_spec_through_store_spec(self) -> None:
+        calls: list[tuple[object, str, str | None, object]] = []
+        client = cast(AsyncNemoClient, object())
+
         class StoringJob(_WithInputJob):
             name = "storing"
+            stored_spec_schema = _CanonicalSpec
 
             @classmethod
             async def store_spec(cls, spec, *, workspace, job_name, async_sdk):
-                del spec, workspace, job_name, async_sdk
-                return None
+                calls.append((spec, workspace, job_name, async_sdk))
 
-        with pytest.raises(TypeError, match="requires allow_spec_update=False"):
-            add_job_routes(StoringJob)
-
-        class RefusingStoringJob(StoringJob):
-            name = "refusing-storing"
-            allow_spec_update = False
-
-        assert isinstance(add_job_routes(RefusingStoringJob), APIRouter)
+        store_spec = _adapt_store_spec(StoringJob)
+        assert store_spec is not None
+        await store_spec("spec", "default", None, client)
+        assert calls == [("spec", "default", None, client)]
+        # Without a stored schema, a job stores its canonical spec, and its spec can be updated.
+        assert _adapt_store_spec(_WithInputJob) is None
 
     def test_respects_job_collection_path_override(self) -> None:
         class FlatCollectionJob(_WidgetJob):
@@ -594,23 +599,3 @@ class TestAddJobRoutes:
         assert "/flat-jobs" in paths
         assert "/flat-jobs/{name}" in paths
         assert "/flat-jobs/jobs" not in paths
-
-
-class _SecretBearingSpec(BaseModel):
-    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
-
-    api_key: int
-
-
-class _OtherSpec(BaseModel):
-    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
-
-    ref: str
-
-
-@pytest.mark.parametrize("schema", [_SecretBearingSpec, _SecretBearingSpec | _OtherSpec], ids=["model", "union"])
-def test_a_stored_spec_that_fails_to_render_never_echoes_its_input(schema: object) -> None:
-    with pytest.raises(HTTPException) as raised:
-        handle_job_spec_mismatch(schema, {"api_key": "SECRET-123"})
-    assert raised.value.status_code == 500
-    assert "SECRET-123" not in str(raised.value.detail)

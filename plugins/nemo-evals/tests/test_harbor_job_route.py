@@ -16,7 +16,7 @@ from nemo_evals.api.schemas import HarborTaskDefinition, TaskRef
 from nemo_evals.api.task_definitions.harbor import HarborArchiveSource, HarborTaskHash
 from nemo_evals.entities import TaskEntity, TaskRevisionEntity, TasksetEntity, TasksetRevisionEntity
 from nemo_evals.jobs.agent_evaluate import AgentEvalJob
-from nemo_evals.jobs.attempt_tasks import FROZEN_TASKS_KEY, TASKS_DIGEST_KEY
+from nemo_evals.jobs.attempt_tasks import TASKS_DIGEST_KEY
 from nemo_evals.revisions import publish_revision
 from nemo_evals.taskset_runs.plan_storage import StoredPlan
 from nemo_helix_plugin.dependencies import get_entity_client, get_nemo_client
@@ -163,7 +163,7 @@ async def test_post_snapshots_tasks_before_creating_job(entity_store, monkeypatc
     assert response.json()["spec"].get("tasks") is None and response.json()["spec"]["task_count"] == 1
     # The step config pins the file's exact bytes; the worker reads them back through its attempt's pointer.
     assert "tasks" not in body.platform_spec.steps[0].config
-    plan_digest = body.spec[FROZEN_TASKS_KEY]["plan_digest"]
-    assert body.platform_spec.steps[0].config[TASKS_DIGEST_KEY] == f"sha256-v1:{plan_digest}"
+    digest = body.spec["frozen_tasks"]["digest"]
+    assert body.platform_spec.steps[0].config[TASKS_DIGEST_KEY] == f"sha256-v1:{digest}"
     assert body.platform_spec.steps[0].executor.provider == "subprocess"
     assert body.platform_spec.steps[0].executor.profile == "harbor-test"

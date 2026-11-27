@@ -5,7 +5,6 @@
 
 from __future__ import annotations
 
-import re
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -24,39 +23,45 @@ from nemo_helix_plugin.jobs.api_factory import (
     job_route_factory,
 )
 from nemo_helix_plugin.jobs.types import StoredJobSpec
-from pydantic import BaseModel
+from pydantic import BaseModel, SerializerFunctionWrapHandler, model_serializer
 from starlette.testclient import TestClient
 
 _CREATE_URL = "/apis/widgets/v2/workspaces/default/jobs"
 
 
+#: How many times the route serialized a canonical spec.
+_DUMPS: list[str] = []
+
+
 class _Spec(BaseModel):
     label: str
+
+    @model_serializer(mode="wrap")
+    def _count_dumps(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+        _DUMPS.append(self.label)
+        return handler(self)
+
+
+class _StoredSpec(BaseModel):
+    label: str
+    stored: bool = True
 
 
 class _Storer:
     """Stores a smaller spec in place of the canonical one, and records what it stored and discarded."""
 
-    def __init__(
-        self,
-        *,
-        refuse: Exception | None = None,
-        spec: dict[str, Any] | None = None,
-        discard_error: Exception | None = None,
-    ) -> None:
-        self.calls: list[tuple[dict[str, Any], str, str]] = []
+    def __init__(self, *, refuse: Exception | None = None, discard_error: Exception | None = None) -> None:
+        self.calls: list[tuple[str, str, str | None]] = []
         self.discarded = 0
         self.refuse = refuse
-        self.spec = spec
         self.discard_error = discard_error
 
-    async def __call__(self, spec: _Spec, workspace: str, job_name: str, async_client: object) -> StoredJobSpec:
+    async def __call__(self, spec: _Spec, workspace: str, job_name: str | None, async_client: object) -> StoredJobSpec:
         del async_client
-        self.calls.append((spec.model_dump(mode="json"), workspace, job_name))
+        self.calls.append((spec.label, workspace, job_name))
         if self.refuse is not None:
             raise self.refuse
-        stored = self.spec if self.spec is not None else {"label": spec.label, "stored": True}
-        return StoredJobSpec(spec=stored, discard=self._discard)
+        return StoredJobSpec(spec=_StoredSpec(label=spec.label), discard=self._discard)
 
     async def _discard(self) -> None:
         self.discarded += 1
@@ -88,7 +93,6 @@ def _post(
         job_input=_Spec,
         platform_job_config_compiler=_compile,
         route_options=[JobRouteOption.CORE, JobRouteOption.DRY_RUN],
-        allow_spec_update=storer is None,
         store_spec=storer,
     )
     app = FastAPI()
@@ -112,26 +116,33 @@ def test_the_job_stores_what_its_type_stores_and_runs_what_was_compiled() -> Non
 
     _, jobs = _post(storer)
 
-    assert storer.calls == [({"label": "x"}, "default", "widget-1")]
+    assert storer.calls == [("x", "default", "widget-1")]
     body = jobs.create_job.await_args.kwargs["body"]
     assert body.spec == {"label": "x", "stored": True}
     assert body.platform_spec.steps[0].config == {"label": "x"}
 
 
-def test_an_unnamed_job_is_named_before_its_spec_is_stored() -> None:
+def test_an_unnamed_job_is_stored_without_a_name_and_the_jobs_service_names_it() -> None:
     storer = _Storer()
 
     _, jobs = _post(storer, name=None)
 
-    [(_, _, job_name)] = storer.calls
-    assert re.fullmatch(r"widgets-[0-9a-f]{8}", job_name)  # as the Jobs service would name it
-    assert jobs.create_job.await_args.kwargs["body"].name == job_name
-
-
-def test_a_job_type_that_stores_its_spec_as_is_keeps_the_jobs_services_naming_and_retries() -> None:
-    _, jobs = _post(None, name=None)
-
+    assert storer.calls == [("x", "default", None)]
     assert jobs.create_job.await_args.kwargs["body"].name is None
+
+
+def test_the_route_serializes_the_canonical_spec_only_when_its_type_stores_it_as_is() -> None:
+    _DUMPS.clear()
+    _post(_Storer())
+    assert _DUMPS == []
+
+    _post(None)
+    assert _DUMPS == ["x"]
+
+
+def test_a_job_type_that_stores_its_spec_as_is_keeps_the_retries() -> None:
+    _, jobs = _post(None)
+
     jobs.with_retry.assert_not_called()
 
 
@@ -168,16 +179,6 @@ def test_a_spec_that_cannot_be_stored_creates_no_job(refusal: Exception, status:
     jobs.create_job.assert_not_called()
 
 
-def test_a_stored_spec_the_replies_cannot_render_is_undone_and_creates_no_job() -> None:
-    storer = _Storer(spec={"stored": True})  # no `label`, so `_Spec` can't render it
-
-    response, jobs = _post(storer)
-
-    assert response.status_code == 500, response.text
-    assert storer.discarded == 1
-    jobs.create_job.assert_not_called()
-
-
 @pytest.mark.parametrize(
     ("create_error", "discarded"),
     [
@@ -205,14 +206,3 @@ def test_a_failing_undo_leaves_the_refusal_to_surface() -> None:
         _post(storer, create_error=_http_error(UnprocessableEntityError, 422), raise_server_exceptions=True)
 
     assert storer.discarded == 1
-
-
-def test_storing_a_spec_requires_refusing_spec_updates() -> None:
-    with pytest.raises(TypeError, match="requires allow_spec_update=False"):
-        job_route_factory(
-            service_name="widgets",
-            job_type="Widget",
-            job_input=_Spec,
-            platform_job_config_compiler=_compile,
-            store_spec=_Storer(),
-        )

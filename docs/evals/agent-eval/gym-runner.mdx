@@ -484,8 +484,8 @@ submission waits.
 With `snapshot`, the submission also publishes the file's tasks and a revision of the named taskset,
 then runs exactly those tasks. Publishing comes after the submission's checks and compile, so a
 submission they refuse leaves the taskset as it was. A refusal after publishing keeps the new revision:
-for example, when the job's `job-tasks-<job name>` FileSet already exists, or the Jobs service refuses
-the job. Resubmitting the same file then publishes nothing more. Submit whenever the file changes:
+for example, when the Jobs service refuses the job. Resubmitting the same file then publishes nothing
+more. Submit whenever the file changes:
 
 | The file | Tasks | Taskset |
 | --- | --- | --- |

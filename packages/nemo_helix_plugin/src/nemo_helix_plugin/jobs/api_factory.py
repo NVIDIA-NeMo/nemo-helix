@@ -5,7 +5,6 @@ import inspect
 import json
 import logging
 import os
-import secrets
 import tarfile
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Generator, Mapping
@@ -108,9 +107,6 @@ from nemo_helix_plugin.jobs.types import (
 )
 from nemo_helix_plugin.jobs.types import (
     HelixJobResponse as HelixJob,
-)
-from nemo_helix_plugin.jobs.types import (
-    generate_job_name as jobs_service_job_name,
 )
 from nemo_helix_plugin.log_utils import sanitize_for_log
 from nemo_helix_plugin.schema import Page, PaginationData
@@ -331,19 +327,6 @@ def _validate_jobs_filter_values(operation: FilterOperation) -> None:
             _validate_jobs_filter_values(child)
 
 
-def _spec_adapter(schema: object) -> TypeAdapter[Any]:
-    """A validator for a job spec schema; a union of models gets ``hide_input_in_errors``.
-
-    A model keeps a rejected input out of its errors only if it sets ``hide_input_in_errors`` on itself.
-    A union of such models is validated by the union's own adapter, which would still put a rejected
-    credential back into the error text. Spec errors reach HTTP responses, so a union gets that setting
-    here; a single model's own config decides.
-    """
-    if _is_union_type(_unwrap_annotated_schema(schema)):
-        return TypeAdapter(schema, config=ConfigDict(hide_input_in_errors=True))
-    return TypeAdapter(schema)
-
-
 @overload
 def handle_job_spec_mismatch(job_input: Type[JobConfigT], spec: object) -> JobConfigT: ...
 
@@ -358,7 +341,7 @@ def handle_job_spec_mismatch(job_input: Type[JobConfigT] | JobSchemaLike, spec: 
     by the jobs microservice.
     """
     try:
-        type_adapter = _spec_adapter(job_input)
+        type_adapter = TypeAdapter(job_input)
         job_spec = type_adapter.validate_python(spec)
     except Exception as e:
         # What happens here is that we received a functional microservice job config back from
@@ -624,9 +607,10 @@ JobNameGenerator = Callable[[], str]
 # Signature: (transformed_spec, platform_spec, workspace, async_client, full) -> checks, where
 # ``full`` (``?dry_run_full=true``) asks for every check in full, such as every dataset row, not a sample.
 DryRunChecks = Callable[[Any, HelixJobSpec, str, AsyncNemoClient, bool], Awaitable[list[JobDryRunCheck]]]
-# Given the canonical spec, workspace, job name and client, writes what a new job keeps outside its record and
-# returns the spec it stores instead (``None`` stores the canonical spec). Runs on a create, after compile.
-SpecStorer = Callable[[Any, str, str, AsyncNemoClient], Awaitable[StoredJobSpec | None]]
+# Given the canonical spec, workspace, job name (``None`` when the Jobs service will name the job) and client,
+# writes what a new job keeps outside its record and returns the spec it stores instead (``None`` stores the
+# canonical spec). Runs on a create, after compile.
+SpecStorer = Callable[[Any, str, str | None, AsyncNemoClient], Awaitable[StoredJobSpec | None]]
 
 
 def _unwrap_annotated_schema(obj: object) -> object:
@@ -844,7 +828,7 @@ async def _store_job_spec(
     store_spec: SpecStorer,
     spec: JobSchemaLike,
     workspace: str,
-    job_name: str,
+    job_name: str | None,
     async_client: AsyncNemoClient,
     service_name: str,
 ) -> StoredJobSpec | None:
@@ -857,7 +841,7 @@ async def _store_job_spec(
         return await store_spec(spec, workspace, job_name, async_client)
 
 
-async def _discard_stored_spec(stored: StoredJobSpec, *, workspace: str, job_name: str) -> None:
+async def _discard_stored_spec(stored: StoredJobSpec, *, workspace: str, job_name: str | None) -> None:
     """Undo what storing a refused job's spec wrote, logging rather than raising, so the refusal surfaces."""
     if stored.discard is None:
         return
@@ -865,9 +849,9 @@ async def _discard_stored_spec(stored: StoredJobSpec, *, workspace: str, job_nam
         await stored.discard()
     except Exception:
         logger.warning(
-            "Could not remove what job %s/%s stored outside its record",
+            "Could not remove what refused job %s/%s stored outside its record",
             sanitize_for_log(workspace),
-            sanitize_for_log(job_name),
+            sanitize_for_log(job_name or "(unnamed)"),
             exc_info=True,
         )
 
@@ -1007,7 +991,6 @@ def job_route_factory(
     legacy_job_filter: FilterOperation | None = None,
     dry_run_checks: DryRunChecks | None = None,
     *,
-    allow_spec_update: bool = True,
     store_spec: SpecStorer | None = None,
 ) -> APIRouter:
     """Create a job router with standard CRUD operations.
@@ -1057,15 +1040,13 @@ def job_route_factory(
             given the canonical spec and the compiled platform spec, such as reading a few dataset
             rows, or every row with ``?dry_run_full=true``. Every dry run first checks that each
             step's execution profile is configured.
-        allow_spec_update: Whether ``PATCH /jobs/{name}`` may replace a job's spec. When ``False``,
-            an update that sets ``spec`` is refused with 422; ``description`` can still change.
-        store_spec: Turns a create's canonical spec into the spec the job stores, writing what the job
-            keeps outside its record. It runs after compile, never on a dry run, and the route names a job
-            submitted without a name first, as the Jobs service would. The route checks the stored spec
-            against ``job_output``, and sends that create once, without retries, so a refusal means no job
-            was made: when the check fails or the Jobs service refuses the job with a 4xx, it undoes those
-            writes. A 5xx or a lost reply leaves the job's existence unknown, so the writes stay. Requires
-            ``allow_spec_update=False``.
+        store_spec: Turns a create's canonical spec into the spec the job stores, an instance of
+            ``job_output``, writing what the job keeps outside its record. It runs after compile, never on a
+            dry run. The route sends that create once, without retries, so a refusal means no job was made:
+            when the Jobs service refuses the job with a 4xx, it undoes those writes. A 5xx or a lost reply
+            leaves the job's existence unknown, so the writes stay. A job route that stores its spec refuses
+            a ``PATCH`` that sets ``spec`` with 422, since an update would store a canonical spec as is;
+            ``description`` can still change.
 
     Example with separate input/output types:
         ```python
@@ -1108,8 +1089,6 @@ def job_route_factory(
 
     if job_discriminator is not None and (not isinstance(job_discriminator, str) or not job_discriminator.strip()):
         raise ValueError("job_discriminator must be a non-empty string when provided")
-    if store_spec is not None and allow_spec_update:
-        raise TypeError("store_spec requires allow_spec_update=False: a spec update stores the canonical spec as is.")
 
     # Handle job_output defaulting and validation
     job_output, input_to_output = _validate_and_resolve_job_output(job_output, job_input, input_to_output)
@@ -1354,26 +1333,7 @@ def job_route_factory(
             control=job_resp.control,
         )
 
-    job_output_adapter = _spec_adapter(job_output)
-
-    async def _require_renderable_stored_spec(stored: StoredJobSpec, *, workspace: str, job_name: str) -> None:
-        """Refuse a stored spec the job's replies couldn't render, undoing its writes, before any job holds it."""
-        try:
-            job_output_adapter.validate_python(stored.spec)
-        except ValidationError as exc:
-            await _discard_stored_spec(stored, workspace=workspace, job_name=job_name)
-            # Locations and messages only: a spec's values may hold credentials.
-            problems = [(error["loc"], error["msg"]) for error in exc.errors(include_url=False, include_input=False)]
-            logger.error(
-                "Job %s/%s stored a spec its replies can't render: %s",
-                sanitize_for_log(workspace),
-                sanitize_for_log(job_name),
-                problems,
-            )
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to submit {service_name} job: its stored spec doesn't match its schema.",
-            ) from exc
+    job_output_adapter = TypeAdapter(job_output)
 
     def validate_own_job(job: HelixJob, name: str, workspace: str) -> HelixJob:
         """Refuse a job these routes do not serve, before acting on it.
@@ -1448,9 +1408,6 @@ def job_route_factory(
             # A dry run creates no job, so it generates no id: it takes the requested name, or a placeholder.
             dry_run_name = request.name or _DRY_RUN_JOB_NAME
             job_name = dry_run_name if dry_run is not None else _resolve_job_name(request.name, generate_job_name)
-            if job_name is None and store_spec is not None:
-                # What the job stores outside its record may be named after it, so it's named now.
-                job_name = jobs_service_job_name(service_name, secrets.token_hex(4))
             input_spec = _without_job_discriminator(cast(JobInputT, request.spec))
             deferred: list[DeferredWrite] = []
             job_spec = await _transform_input_to_output(
@@ -1485,15 +1442,21 @@ def job_route_factory(
                     platform_spec, job_spec, workspace, async_client, dry_run_checks, full=dry_run.full
                 )
                 response.status_code = status.HTTP_200_OK
-                # Shown as the job's replies would show it once stored: their schema can differ from the
-                # spec compiled (``NemoJob.stored_spec_schema``).
-                preview = job_spec.model_dump(mode="json") if isinstance(job_spec, BaseModel) else job_spec
+                preview = cast(BaseModel, job_spec)
+                if (
+                    isinstance(job_output, type)
+                    and isinstance(job_spec, BaseModel)
+                    and not isinstance(job_spec, job_output)
+                ):
+                    # The job's replies render another schema (``NemoJob.stored_spec_schema``), so the spec is
+                    # shown as they would show it once stored.
+                    preview = handle_job_spec_mismatch(job_output, job_spec.model_dump(mode="json"))
                 return TypedJobResponse(
                     name=dry_run_name,
                     workspace=workspace,
                     description=request.description,
                     project=request.project,
-                    spec=handle_job_spec_mismatch(job_output, preview),
+                    spec=preview,
                     ownership=request.ownership,
                     custom_fields=request.custom_fields,
                     status_details={"checks": [check.model_dump() for check in checks]},
@@ -1518,14 +1481,13 @@ def job_route_factory(
             # bundle's raw ``bytes``, whose ``ser_json_bytes="base64"`` never runs) that then fail to
             # JSON-encode on the wire (invalid utf-8 on the pickle marker). ``mode="json"`` runs each
             # nested model's own JSON serializer, so bytes base64-encode and round-trip on read.
-            spec_dict = job_spec.model_dump(mode="json") if isinstance(job_spec, BaseModel) else job_spec
             stored: StoredJobSpec | None = None
             if store_spec is not None:
-                assert job_name is not None
                 stored = await _store_job_spec(store_spec, job_spec, workspace, job_name, async_client, service_name)
-                if stored is not None:
-                    await _require_renderable_stored_spec(stored, workspace=workspace, job_name=job_name)
-                    spec_dict = stored.spec
+            if stored is not None:
+                spec_dict = stored.spec.model_dump(mode="json")
+            else:
+                spec_dict = job_spec.model_dump(mode="json") if isinstance(job_spec, BaseModel) else job_spec
             # Stamp only after transform/compile; metadata must not enter task configuration.
             spec_dict = _stored_job_spec(spec_dict)
 
@@ -1562,7 +1524,7 @@ def job_route_factory(
                 ).data()
             except HTTPClientError:
                 # A refused job owns nothing it stored. A 5xx or a lost reply leaves the job unknown, so those keep it.
-                if stored is not None and job_name is not None:
+                if stored is not None:
                     await _discard_stored_spec(stored, workspace=workspace, job_name=job_name)
                 raise
             return from_response(job_resp)
@@ -1681,7 +1643,7 @@ def job_route_factory(
         ) -> TypedJobResponse:
             f"""Update a job for the {service_name} microservice."""
 
-            if not allow_spec_update and "spec" in request.model_fields_set:
+            if store_spec is not None and "spec" in request.model_fields_set:
                 raise HTTPException(
                     status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                     detail="This job's spec can't be replaced; submit a new job instead.",
