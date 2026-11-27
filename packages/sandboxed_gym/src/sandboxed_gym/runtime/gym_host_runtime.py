@@ -58,7 +58,11 @@ from sandboxed_gym.environment_package import (
     validate_environment_namespaces,
 )
 from sandboxed_gym.execd import EXECD_ACCESS_TOKEN_ENV
-from sandboxed_gym.runtime.agent_bundle import AGENT_EXECUTABLE_ENV_KEY, activate_agent_executable
+from sandboxed_gym.runtime.agent_bundle import (
+    AGENT_BUNDLE_FEATURE,
+    AGENT_EXECUTABLE_ENV_KEY,
+    activate_agent_executable,
+)
 from sandboxed_gym.runtime.container_engine import prepare_container_engine
 
 GYM_GLOBAL_CONFIG_ENV_KEY = "NHX_GYM_GLOBAL_CONFIG"
@@ -1429,7 +1433,7 @@ class Handler(BaseHTTPRequestHandler):
         elif not _READY or _HEAD_SERVER_CONFIG is None or _ROLLOUT_HELPER is None:
             self._send_json(503, {"status": "starting"})
         else:
-            self._send_json(200, {"status": "ready"})
+            self._send_json(200, {"status": "ready", "features": [AGENT_BUNDLE_FEATURE]})
 
     def do_POST(self) -> None:
         if not self.path.startswith("/rollouts/run"):

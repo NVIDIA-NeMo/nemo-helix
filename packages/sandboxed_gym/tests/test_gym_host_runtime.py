@@ -33,6 +33,7 @@ from sandboxed_gym.environment_package import (
     WheelsV1Package,
 )
 from sandboxed_gym.runtime import gym_host_runtime as runtime
+from sandboxed_gym.runtime.agent_bundle import AGENT_BUNDLE_FEATURE
 
 
 class _FakeRolloutHelper:
@@ -172,7 +173,7 @@ def test_health_ready(ready_server):
 
     with urllib.request.urlopen(f"{ready_server}/health", timeout=5) as resp:
         assert resp.status == 200
-        assert json.loads(resp.read().decode()) == {"status": "ready"}
+        assert json.loads(resp.read().decode()) == {"status": "ready", "features": [AGENT_BUNDLE_FEATURE]}
 
 
 def test_rollouts_run_returns_results(ready_server):
@@ -1322,7 +1323,7 @@ def test_health_stays_answerable_during_a_rollout(slow_server):
     try:
         time.sleep(0.2)
         with urllib.request.urlopen(f"{base_url}/health", timeout=5) as health:
-            assert json.loads(health.read().decode()) == {"status": "ready"}
+            assert json.loads(health.read().decode()) == {"status": "ready", "features": [AGENT_BUNDLE_FEATURE]}
     finally:
         release.set()
         rollout.join(timeout=10)
@@ -1352,7 +1353,7 @@ def test_a_disconnected_caller_cancels_the_batch(slow_server):
     release.set()
     # And the server stays healthy for the next caller rather than wedging on the broken one.
     with urllib.request.urlopen(f"{base_url}/health", timeout=5) as health:
-        assert json.loads(health.read().decode()) == {"status": "ready"}
+        assert json.loads(health.read().decode()) == {"status": "ready", "features": [AGENT_BUNDLE_FEATURE]}
 
 
 def test_rollouts_reuse_one_live_event_loop():

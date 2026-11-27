@@ -236,6 +236,9 @@ fails. `gym_host.sh` runs the check itself before the host's server starts, and 
 timeout. `gym_host.sh` refuses the `nhx-gym-host-podman` image, which must start with its default
 command. The Gym host has to start with its image's default command or with `gym_host.sh`, which do
 this; a host image that starts its own server instead gets neither the check nor the `PATH` change.
+A host image from before agent bundle support ignores the bundle, and its Gym would install its own
+agent CLI at the first rollout. The provider refuses such a host as soon as it reports ready, and the
+job fails with a bootstrap error that names the bundle.
 
 The bundle is a deployment setting: every Gym job on the deployment gets the same CLI. It requires
 the OpenSandbox provider with the NeMo extension installed, and a bundle built for the

@@ -27,7 +27,7 @@ from sandboxed_gym.host.models import (
 )
 from sandboxed_gym.opensandbox_policy import create_options_with_policy
 from sandboxed_gym.quantity import quantity_bytes, quantity_gib_rounded_up
-from sandboxed_gym.runtime.agent_bundle import AGENT_EXECUTABLE_ENV_KEY
+from sandboxed_gym.runtime.agent_bundle import AGENT_BUNDLE_FEATURE, AGENT_EXECUTABLE_ENV_KEY
 
 LOGGER = logging.getLogger(__name__)
 
@@ -314,6 +314,7 @@ class OpenSandboxGymHostProvider:
             try:
                 body = await asyncio.to_thread(self._get_json, handle)
                 if body.get("status") == "ready":
+                    self._check_agent_bundle_support(handle, body)
                     return
                 if body.get("status") == "failed":
                     raise GymHostBootstrapFailed(
@@ -330,6 +331,19 @@ class OpenSandboxGymHostProvider:
         raise TimeoutError(
             f"job host {handle.host_id} at {handle.health_url} did not become ready within {timeout_s:g}s"
             + (f": {last_error}" if last_error is not None else "")
+        )
+
+    def _check_agent_bundle_support(self, handle: "GymHostHandle[OpenSandboxDriver]", body: dict[str, Any]) -> None:
+        """Refuse a host image that ignores the agent bundle, rather than let its Gym install another CLI."""
+        if self._agent_bundle is None:
+            return
+        features = body.get("features")
+        if isinstance(features, list) and AGENT_BUNDLE_FEATURE in features:
+            return
+        raise GymHostBootstrapFailed(
+            f"job host {handle.host_id} runs a Gym host image without agent bundle support: it would ignore "
+            f"the bundle's {self._agent_bundle['entrypoint']} and let Gym install its own agent CLI instead. "
+            "Use a Gym host image from this platform release."
         )
 
     def _get_json(self, handle: "GymHostHandle[OpenSandboxDriver]") -> dict[str, Any]:

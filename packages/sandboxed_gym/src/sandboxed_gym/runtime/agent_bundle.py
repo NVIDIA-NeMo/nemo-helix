@@ -13,6 +13,10 @@ import subprocess
 from collections.abc import Callable, MutableMapping
 
 AGENT_EXECUTABLE_ENV_KEY = "NHX_GYM_AGENT_EXECUTABLE"
+#: What a ready host lists under ``features`` in its ``/health`` response once it handles
+#: ``AGENT_EXECUTABLE_ENV_KEY``. An older host image ignores the variable: the bundle's CLI would never go on
+#: ``PATH`` and Gym would install its own at the first rollout, so the provider refuses a host that doesn't list it.
+AGENT_BUNDLE_FEATURE = "agent_bundle"
 #: How long ``--version`` may take; a CLI that hangs fails the host rather than holding it until the
 #: caller's readiness timeout.
 VERSION_TIMEOUT_S = 120
