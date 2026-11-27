@@ -1533,7 +1533,7 @@ jobs:
         run: pnpm run --recursive --parallel --if-present typecheck
 
   web-test:
-    name: Web tests (${{ matrix.shard }}/4)
+    name: Web tests (${{ matrix.shard }})
     needs: [changes]
     if: >
       !cancelled() && (
@@ -1544,7 +1544,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
+        # Studio splits four ways. The other packages (mostly @nemo/common, ~170 s) get their own
+        # job: run before a Studio shard, they made that shard the last web job in most runs.
+        shard: [studio 1/4, studio 2/4, studio 3/4, studio 4/4, other packages]
     defaults:
       run:
         working-directory: web
@@ -1569,11 +1571,10 @@ jobs:
               filters+=(--filter=nemo-studio-ui)
             fi
           fi
-          if [ "${SHARD}" = 1 ]; then
+          if [ "${SHARD}" = "other packages" ]; then
             pnpm "${filters[@]}" --filter='!nemo-studio-ui' run --parallel --if-present test:ci
-          fi
-          if pnpm "${filters[@]}" ls --depth -1 --json | jq -e 'any(.[]; .name == "nemo-studio-ui")' > /dev/null; then
-            pnpm --filter nemo-studio-ui run test:ci --shard="${SHARD}/4"
+          elif pnpm "${filters[@]}" ls --depth -1 --json | jq -e 'any(.[]; .name == "nemo-studio-ui")' > /dev/null; then
+            pnpm --filter nemo-studio-ui run test:ci --shard="${SHARD#studio }"
           else
             echo "nemo-studio-ui is unaffected by this change; skipping."
           fi
