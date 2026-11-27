@@ -34,6 +34,15 @@ const emptyResult: UseModelSearchResult = {
   onLoadMore: vi.fn(),
   hasMore: false,
   isLoadingMore: false,
+  modelFilters: {
+    values: {},
+    onChange: vi.fn(),
+    providerOptions: [],
+    capabilityOptions: [],
+    inputModalityOptions: [],
+    sizeOptions: [],
+    providersLoading: false,
+  },
 };
 
 const buildModel = (overrides: Partial<ModelEntity> = {}) =>

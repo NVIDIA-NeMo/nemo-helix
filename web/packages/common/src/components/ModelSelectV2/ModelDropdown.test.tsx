@@ -1,6 +1,12 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import {
+  MODEL_CAPABILITY_OPTIONS,
+  MODEL_INPUT_MODALITY_OPTIONS,
+  MODEL_SIZE_OPTIONS,
+  type ModelFilterControls,
+} from '@nemo/common/src/api/models/modelFilters';
 import type { ModelWorkspaceGroup } from '@nemo/common/src/api/models/useModels';
 import { ModelDropdown } from '@nemo/common/src/components/ModelSelectV2/ModelDropdown';
 import type { ModelEntity } from '@nemo/sdk/generated/platform/schema';
@@ -121,6 +127,111 @@ describe('ModelDropdown', () => {
       await waitFor(() => expect(onSearchChange).toHaveBeenCalledWith('llama'));
       // The caller owns the query, so both models stay listed until new groups arrive.
       expect(listedModels()).toEqual(['nemotron-8b', 'llama-3.1-8b']);
+    });
+  });
+
+  describe('filters', () => {
+    const makeFilters = (overrides: Partial<ModelFilterControls> = {}): ModelFilterControls => ({
+      values: {},
+      onChange: vi.fn(),
+      providerOptions: [{ value: 'default/nvidia-build', label: 'nvidia-build' }],
+      capabilityOptions: MODEL_CAPABILITY_OPTIONS,
+      inputModalityOptions: MODEL_INPUT_MODALITY_OPTIONS,
+      sizeOptions: MODEL_SIZE_OPTIONS,
+      providersLoading: false,
+      ...overrides,
+    });
+
+    it('hides the filter bar when no modelFilters are given', () => {
+      renderOpen();
+
+      expect(screen.queryByTestId('model-select-v2-filters')).not.toBeInTheDocument();
+    });
+
+    it('renders a provider, size and capabilities filter', () => {
+      renderOpen({ modelFilters: makeFilters() });
+
+      expect(screen.getByRole('combobox', { name: 'Filter by provider' })).toBeInTheDocument();
+      expect(screen.getByRole('combobox', { name: 'Filter by size' })).toBeInTheDocument();
+      expect(screen.getByRole('combobox', { name: 'Filter by capability' })).toBeInTheDocument();
+    });
+
+    it('lists what a model can do and what it accepts in one filter', async () => {
+      renderOpen({ modelFilters: makeFilters() });
+
+      fireEvent.click(screen.getByRole('combobox', { name: 'Filter by capability' }));
+
+      expect(await screen.findByText('Features')).toBeInTheDocument();
+      expect(screen.getByText('Input')).toBeInTheDocument();
+      expect(screen.getByRole('option', { name: 'Tool calling' })).toBeInTheDocument();
+      expect(screen.getByRole('option', { name: 'Image' })).toBeInTheDocument();
+    });
+
+    it('adds a ticked option to the ones already picked', async () => {
+      const onChange = vi.fn();
+      renderOpen({
+        modelFilters: makeFilters({
+          values: { capabilities: ['tool_calling'], inputModalities: ['text'] },
+          onChange,
+        }),
+      });
+
+      fireEvent.click(screen.getByRole('combobox', { name: 'Filter by capability' }));
+      fireEvent.click(await screen.findByRole('option', { name: 'Image' }));
+
+      expect(onChange).toHaveBeenCalledWith({
+        capabilities: ['tool_calling'],
+        inputModalities: ['text', 'image'],
+      });
+    });
+
+    it('lists capability and input picks on the trigger', () => {
+      renderOpen({
+        modelFilters: makeFilters({
+          values: { capabilities: ['reasoning'], inputModalities: ['image'] },
+        }),
+      });
+
+      expect(screen.getByRole('combobox', { name: 'Filter by capability' })).toHaveTextContent(
+        'Reasoning, Image'
+      );
+    });
+
+    it('counts several picks on a narrow filter', () => {
+      renderOpen({
+        modelFilters: makeFilters({ values: { sizes: ['small', 'xlarge'] } }),
+      });
+
+      expect(screen.getByRole('combobox', { name: 'Filter by size' })).toHaveTextContent(
+        'Size · 2'
+      );
+    });
+
+    it('disables a filter that has nothing to offer', () => {
+      renderOpen({ modelFilters: makeFilters({ providerOptions: [] }) });
+
+      expect(screen.getByRole('combobox', { name: 'Filter by provider' })).toBeDisabled();
+    });
+
+    it('reports a failed request instead of blaming the filters', () => {
+      renderOpen({
+        groups: [],
+        error: new Error('boom'),
+        modelFilters: makeFilters({ values: { sizes: ['xlarge'] } }),
+      });
+
+      expect(screen.getByText("Couldn't load models")).toBeInTheDocument();
+      expect(screen.queryByText('No models match these filters')).not.toBeInTheDocument();
+    });
+
+    it('says the filters excluded everything when no models match', () => {
+      renderOpen({
+        groups: [],
+        emptyMessage: 'No models',
+        modelFilters: makeFilters({ values: { sizes: ['xlarge'] } }),
+      });
+
+      expect(screen.getByText('No models match these filters')).toBeInTheDocument();
     });
   });
 

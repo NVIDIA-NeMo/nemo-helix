@@ -1,13 +1,26 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import {
+  MODEL_CAPABILITY_OPTIONS,
+  MODEL_INPUT_MODALITY_OPTIONS,
+  MODEL_SIZE_OPTIONS,
+  MODEL_SIZE_BUCKETS,
+  type ModelFilterValues,
+  type ModelSizeBucket,
+} from '@nemo/common/src/api/models/modelFilters';
 import type { ModelWorkspaceGroup } from '@nemo/common/src/api/models/useModels';
 import { ModelSelect } from '@nemo/common/src/components/ModelSelectV2/ModelSelect';
 import type {
   ModelSelection,
   ModelSelectProps,
 } from '@nemo/common/src/components/ModelSelectV2/types';
-import type { InferenceParams } from '@nemo/sdk/generated/platform/schema';
+import type {
+  InferenceParams,
+  ModelCapability,
+  ModelEntity,
+  ModelModality,
+} from '@nemo/sdk/generated/platform/schema';
 import type { Meta, StoryObj } from '@storybook/react';
 import { useState } from 'react';
 
@@ -153,6 +166,109 @@ const WithModelTypeToggleRender = (args: ModelSelectProps) => {
 
 export const WithModelTypeToggle: Story = {
   render: WithModelTypeToggleRender,
+};
+
+const withMetadataFromName = (model: ModelEntity): ModelEntity => {
+  const billions = /-(\d+)b/.exec(model.name)?.[1];
+  const isNemotron = model.name.startsWith('nemotron');
+  const capabilities: ModelCapability[] = [];
+  if (isNemotron || model.name.includes('instruct')) {
+    capabilities.push('tool_calling');
+  }
+  if (isNemotron) {
+    capabilities.push('reasoning');
+  }
+  const inputModalities: ModelModality[] = model.name.includes('70b')
+    ? ['text', 'image']
+    : ['text'];
+  return {
+    ...model,
+    metadata: {
+      capabilities,
+      input_modalities: inputModalities,
+      ...(billions ? { parameter_count: Number(billions) * 1e9 } : {}),
+    },
+  };
+};
+
+const isInAnySizeBucket = (model: ModelEntity, sizes: readonly ModelSizeBucket[]): boolean => {
+  const parameterCount = model.metadata?.parameter_count;
+  if (parameterCount === undefined) {
+    return false;
+  }
+  return MODEL_SIZE_BUCKETS.some(
+    (bucket) =>
+      sizes.includes(bucket.value) &&
+      parameterCount >= bucket.minParameters &&
+      parameterCount < (bucket.maxParameters ?? Infinity)
+  );
+};
+
+const includesAny = <T,>(values: readonly T[] | undefined, wanted: readonly T[] | undefined) =>
+  !wanted?.length || wanted.some((value) => values?.includes(value));
+
+const EXTRA_NVIDIA_MODELS = [
+  'nemotron-4-340b-instruct',
+  'nemotron-4-340b-reward',
+  'nemotron-mini-4b',
+].map(
+  (name, index): ModelEntity => ({
+    id: `extra-${index}`,
+    name,
+    workspace: 'nvidia',
+    created_at: '2025-06-01T00:00:00Z',
+    updated_at: '2025-06-01T00:00:00Z',
+  })
+);
+
+const sizedMockGroups = mockGroups.map((group) => ({
+  ...group,
+  models: [...group.models, ...(group.workspace === 'nvidia' ? EXTRA_NVIDIA_MODELS : [])].map(
+    withMetadataFromName
+  ),
+}));
+
+const WithFiltersRender = (args: ModelSelectProps) => {
+  const [value, setValue] = useState<ModelSelection | null>(null);
+  const [filters, setFilters] = useState<ModelFilterValues>({});
+  const { providers, capabilities, inputModalities, sizes } = filters;
+  const groups = sizedMockGroups
+    .filter((group) => includesAny([group.workspace], providers))
+    .map((group) => ({
+      ...group,
+      models: group.models.filter(
+        (model) =>
+          includesAny(model.metadata?.capabilities, capabilities) &&
+          includesAny(model.metadata?.input_modalities, inputModalities) &&
+          (!sizes?.length || isInAnySizeBucket(model, sizes))
+      ),
+    }))
+    .filter((group) => group.models.length > 0);
+
+  return (
+    <ModelSelect
+      {...args}
+      value={value}
+      onValueChange={setValue}
+      groups={groups}
+      modelFilters={{
+        values: filters,
+        onChange: setFilters,
+        providerOptions: mockGroups.map(({ workspace }) => ({
+          value: workspace,
+          label: `${workspace}-build`,
+        })),
+        capabilityOptions: MODEL_CAPABILITY_OPTIONS,
+        inputModalityOptions: MODEL_INPUT_MODALITY_OPTIONS,
+        sizeOptions: MODEL_SIZE_OPTIONS,
+        providersLoading: false,
+      }}
+    />
+  );
+};
+
+export const WithFilters: Story = {
+  render: WithFiltersRender,
 };
 
 const WithParamsRender = (args: ModelSelectProps) => {

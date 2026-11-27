@@ -3,9 +3,11 @@
 import * as React$1 from "react";
 import react__default, { AriaAttributes, CSSProperties, ChangeEvent, ComponentProps, ComponentPropsWithRef, ComponentPropsWithoutRef, ComponentType, ElementType, FC, ForwardRefExoticComponent, JSX as JSX$1, JSXElementConstructor, MouseEventHandler, PropsWithChildren, ReactElement, ReactNode, RefAttributes, RefObject, SVGProps } from "react";
 import { ThreadMessageLike, ThreadPrimitive, ToolCallMessagePartComponent } from "@assistant-ui/react";
-import { HelixJobLog, HelixJobStatus, InferenceParams, ModelEntity, ModelEntityFilter, ModelEntitysPage, ModelsListModelsParams, PromptData } from "@nemo/sdk/generated/platform/schema";
+import { HelixJobLog, HelixJobStatus, InferenceParams, ModelEntity, ModelEntityFilter, ModelEntitysPage, ModelProvidersPage, ModelsListModelsParams, ModelsListProvidersParams, PromptData } from "@nemo/sdk/generated/platform/schema";
 import { Agent } from "@nemo/sdk/generated/agents/schema";
 import { VariantProps } from "class-variance-authority";
+import { ModelCapability } from "@nemo/sdk/generated/platform/schema/ModelCapability";
+import { ModelModality } from "@nemo/sdk/generated/platform/schema/ModelModality";
 import { ModelEntitySortField } from "@nemo/sdk/generated/platform/schema/ModelEntitySortField";
 import { HelixJobStatus as HelixJobStatus$1 } from "@nemo/sdk/generated/platform/schema/HelixJobStatus";
 //#endregion
@@ -10070,6 +10072,48 @@ interface LogViewerProps {
 }
 export declare const LogViewer: FC<LogViewerProps>;
 //#endregion
+//#region src/api/models/modelFilters.d.ts
+declare const SIZE_BUCKETS: readonly [{
+  readonly value: 'small';
+  readonly label: 'Under 3B';
+  readonly minParameters: 0;
+  readonly maxParameters: number;
+}, {
+  readonly value: 'medium';
+  readonly label: '3B to 10B';
+  readonly minParameters: number;
+  readonly maxParameters: number;
+}, {
+  readonly value: 'large';
+  readonly label: '10B to 50B';
+  readonly minParameters: number;
+  readonly maxParameters: number;
+}, {
+  readonly value: 'xlarge';
+  readonly label: '50B and over';
+  readonly minParameters: number;
+}];
+type ModelSizeBucket = (typeof SIZE_BUCKETS)[number]['value'];
+interface ModelFilterValues {
+  providers?: string[];
+  capabilities?: ModelCapability[];
+  inputModalities?: ModelModality[];
+  sizes?: ModelSizeBucket[];
+}
+interface ModelFilterOption {
+  value: string;
+  label: string;
+}
+interface ModelFilterControls {
+  values: ModelFilterValues;
+  onChange: (values: ModelFilterValues) => void;
+  providerOptions: ModelFilterOption[];
+  capabilityOptions: ModelFilterOption[];
+  inputModalityOptions: ModelFilterOption[];
+  sizeOptions: ModelFilterOption[];
+  providersLoading: boolean;
+}
+//#endregion
 //#region src/api/models/modelPages.d.ts
 /**
  * Lists one page of a workspace's models. Studio passes the SDK's `modelsListModels`; a plugin
@@ -10080,6 +10124,7 @@ type ModelWorkspaceGroup = {
   workspace: string;
   models: ModelEntity[];
 };
+type ListProviders = (workspace: string, params: ModelsListProvidersParams) => Promise<ModelProvidersPage>;
 //#endregion
 //#region src/components/TrainingParameterSlider/types.d.ts
 type SliderProps = ComponentProps<typeof Slider>;
@@ -10170,6 +10215,8 @@ interface ModelSelectProps extends ModelSelectParamsProps {
   doneLoadingMessage?: string;
   /** Copy shown when no models match. */
   emptyMessage?: string;
+  /** The failed model request, if any. Shown in place of the empty message. */
+  error?: Error | null;
   /** Whether the first page of models is still loading */
   loading?: boolean;
   /** Whether the component is disabled */
@@ -10185,6 +10232,8 @@ interface ModelSelectProps extends ModelSelectParamsProps {
    * the caller owns the filter and the dropdown stops applying it to {@link groups}.
    */
   onModelTypeChange?: (modelType: ModelType) => void;
+  /** Provider, capability, input and size filters. Spread from `useModelSearch`; omit to hide the filter bar. */
+  modelFilters?: ModelFilterControls;
   /**
    * Hide each model's adapter sub-list. When true, models render as flat,
    * directly-selectable items even if they have adapters.
@@ -10262,6 +10311,8 @@ interface UseModelSearchCoreOptions {
   /** Workspace to search. The query stays idle while this is null. */
   workspace: string | null;
   listModels: ListModels;
+  /** Fills the provider filter's options. Without it the provider filter offers only its current value. */
+  listProviders?: ListProviders;
   /** Extra filters merged into the request (e.g. `lora_enabled`, `base_model`). */
   filter?: ModelSearchFilter;
   sort?: ModelEntitySortField;
@@ -10273,6 +10324,7 @@ interface UseModelSearchCoreOptions {
    * filters down to nothing, so an excluded page never stalls the list.
    */
   include?: (model: ModelEntity) => boolean;
+  initialFilters?: ModelFilterValues;
 }
 /**
  * Props for `ModelSelect`, ready to spread. Every field lines up with a prop name so a caller
@@ -10285,11 +10337,12 @@ interface ModelSearchProps {
   onLoadMore: () => Promise<void>;
   hasMore: boolean;
   isLoadingMore: boolean;
+  modelFilters: ModelFilterControls;
+  error: Error | null;
 }
 interface UseModelSearchResult extends ModelSearchProps {
   models: ModelEntity[];
   search: string;
-  error: Error | null;
 }
 /**
  * Server-side model search with progressive paging — the counterpart to `useAllModels`, which
@@ -10303,13 +10356,15 @@ interface UseModelSearchResult extends ModelSearchProps {
  * const models = useModelSearchCore({ workspace, listModels, enabled: open });
  * return <ModelSelect {...models} value={value} onValueChange={onChange} onOpenChange={setOpen} />;
  */
-declare const useModelSearchCore: ({ workspace, listModels, filter, sort, pageSize, enabled, include }: UseModelSearchCoreOptions) => UseModelSearchResult;
+declare const useModelSearchCore: ({ workspace, listModels, listProviders, filter, sort, pageSize, enabled, include, initialFilters }: UseModelSearchCoreOptions) => UseModelSearchResult;
 //#endregion
 //#region src/components/ModelSelectV2/WorkspaceModelSelectCore.d.ts
 interface WorkspaceModelSelectCoreProps extends Omit<ModelSelectProps, keyof ModelSearchProps> {
   /** Workspace to search. Nothing is fetched while this is null. */
   workspace: string | null;
   listModels: ListModels;
+  /** Fills the provider filter's options. */
+  listProviders?: ListProviders;
   /** Extra filters merged into the search request (e.g. `lora_enabled`). */
   filter?: ModelSearchFilter;
   /** Client-side predicate for conditions the API cannot express (e.g. "has a deployment"). */
@@ -11657,4 +11712,4 @@ export declare const CJobLaunchableStatuses: HelixJobStatus$1[];
 export declare const CJobTerminalStatuses: HelixJobStatus$1[];
 export declare const HelixJobTerminalStatuses: HelixJobStatus$1[];
 //#endregion
-export { type AccordionSectionProps, type AgentSelectProps, type ApiFilter, type AssistantChatMessageContentProps, type AssistantChatProps, type BadgeStatus, type CreateSecretFormData, type CreateSecretModalProps, type CsvOptions, type CsvRow, index_d_exports as DataView, type DeleteAction, type DeleteActionLabel, type DownloadFormat, type FetchAllPagesOptions, type FileTagProps, type FileTagStatus, type FileUploadProps, type FilterOperators, type FormModalProps, type ListModels, type LogStatus, type ModelSearchFilter, type ModelSearchProps, type ModelSelectProps, type ModelSelection, type ModelType, type ModelWorkspaceGroup, type MultiAgentSelectProps, type NotifyFn, type NotifyType, type PaginatedResponse, type QuickActionItem, type RadioCardProps, type RenderFileTagFn, type SingleAgentSelectProps, type StatusConfigEntry, type StudioDataViewState, type StudioDataViewToolbarProps, type UseModelSearchCoreOptions as UseModelSearchOptions, type UseModelSearchResult, type UseStudioDataViewStateOptions, type WithFilterOperators, WorkspaceModelSelectCore as WorkspaceModelSelect, type WorkspaceModelSelectCoreProps as WorkspaceModelSelectProps, useModelSearchCore as useModelSearch };
+export { type AccordionSectionProps, type AgentSelectProps, type ApiFilter, type AssistantChatMessageContentProps, type AssistantChatProps, type BadgeStatus, type CreateSecretFormData, type CreateSecretModalProps, type CsvOptions, type CsvRow, index_d_exports as DataView, type DeleteAction, type DeleteActionLabel, type DownloadFormat, type FetchAllPagesOptions, type FileTagProps, type FileTagStatus, type FileUploadProps, type FilterOperators, type FormModalProps, type ListModels, type ListProviders, type LogStatus, type ModelSearchFilter, type ModelSearchProps, type ModelSelectProps, type ModelSelection, type ModelType, type ModelWorkspaceGroup, type MultiAgentSelectProps, type NotifyFn, type NotifyType, type PaginatedResponse, type QuickActionItem, type RadioCardProps, type RenderFileTagFn, type SingleAgentSelectProps, type StatusConfigEntry, type StudioDataViewState, type StudioDataViewToolbarProps, type UseModelSearchCoreOptions as UseModelSearchOptions, type UseModelSearchResult, type UseStudioDataViewStateOptions, type WithFilterOperators, WorkspaceModelSelectCore as WorkspaceModelSelect, type WorkspaceModelSelectCoreProps as WorkspaceModelSelectProps, useModelSearchCore as useModelSearch };

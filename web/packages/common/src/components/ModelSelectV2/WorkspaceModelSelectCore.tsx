@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { ListModels } from '@nemo/common/src/api/models/modelPages';
+import type { ListModels, ListProviders } from '@nemo/common/src/api/models/modelPages';
 import {
   useModelSearchCore,
   type ModelSearchFilter,
@@ -19,6 +19,8 @@ export interface WorkspaceModelSelectCoreProps extends Omit<
   /** Workspace to search. Nothing is fetched while this is null. */
   workspace: string | null;
   listModels: ListModels;
+  /** Fills the provider filter's options. */
+  listProviders?: ListProviders;
   /** Extra filters merged into the search request (e.g. `lora_enabled`). */
   filter?: ModelSearchFilter;
   /** Client-side predicate for conditions the API cannot express (e.g. "has a deployment"). */
@@ -38,6 +40,7 @@ export interface WorkspaceModelSelectCoreProps extends Omit<
 export const WorkspaceModelSelectCore: FC<WorkspaceModelSelectCoreProps> = ({
   workspace,
   listModels,
+  listProviders,
   filter,
   include,
   enabled = true,
@@ -45,14 +48,23 @@ export const WorkspaceModelSelectCore: FC<WorkspaceModelSelectCoreProps> = ({
   ...selectProps
 }) => {
   const [open, setOpen] = useState(false);
-  const { groups, loading, onSearchChange, onLoadMore, hasMore, isLoadingMore } =
-    useModelSearchCore({
-      workspace,
-      listModels,
-      filter,
-      include,
-      enabled: enabled && open,
-    });
+  const {
+    groups,
+    loading,
+    onSearchChange,
+    onLoadMore,
+    hasMore,
+    isLoadingMore,
+    modelFilters,
+    error,
+  } = useModelSearchCore({
+    workspace,
+    listModels,
+    listProviders,
+    filter,
+    include,
+    enabled: enabled && open,
+  });
 
   const handleOpenChange = (nextOpen: boolean) => {
     setOpen(nextOpen);
@@ -68,6 +80,8 @@ export const WorkspaceModelSelectCore: FC<WorkspaceModelSelectCoreProps> = ({
       onLoadMore={onLoadMore}
       hasMore={hasMore}
       isLoadingMore={isLoadingMore}
+      modelFilters={modelFilters}
+      error={error}
       onOpenChange={handleOpenChange}
     />
   );

@@ -1,14 +1,19 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { ListModels } from '@nemo/common/src/api/models/modelPages';
+import type { ListModels, ListProviders } from '@nemo/common/src/api/models/modelPages';
 import { useModelSearchCore } from '@nemo/common/src/api/models/useModelSearchCore';
-import type { ModelEntity, ModelEntitysPage } from '@nemo/sdk/generated/platform/schema';
+import type {
+  ModelEntity,
+  ModelEntitysPage,
+  ModelProvidersPage,
+} from '@nemo/sdk/generated/platform/schema';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 
 const mockListModels = vi.fn<ListModels>();
+const mockListProviders = vi.fn<ListProviders>();
 
 const createWrapper = () => {
   const queryClient = new QueryClient({
@@ -27,7 +32,13 @@ const makePage = (data: ModelEntity[], page: number, totalPages: number): ModelE
 
 const renderSearch = (options: Partial<Parameters<typeof useModelSearchCore>[0]> = {}) =>
   renderHook(
-    () => useModelSearchCore({ workspace: 'ws1', listModels: mockListModels, ...options }),
+    () =>
+      useModelSearchCore({
+        workspace: 'ws1',
+        listModels: mockListModels,
+        listProviders: mockListProviders,
+        ...options,
+      }),
     {
       wrapper: createWrapper(),
     }
@@ -35,6 +46,8 @@ const renderSearch = (options: Partial<Parameters<typeof useModelSearchCore>[0]>
 
 beforeEach(() => {
   mockListModels.mockReset();
+  mockListProviders.mockReset();
+  mockListProviders.mockResolvedValue({ data: [] } as unknown as ModelProvidersPage);
 });
 
 describe('useModelSearchCore', () => {
@@ -71,6 +84,21 @@ describe('useModelSearchCore', () => {
       expect(mockListModels).toHaveBeenLastCalledWith(
         'ws1',
         expect.objectContaining({ filter: expect.objectContaining({ name: { $like: 'llama' } }) })
+      )
+    );
+  });
+
+  it('keeps a search term that starts with a bracket from being read as JSON', async () => {
+    mockListModels.mockResolvedValue(makePage([makeModel('a')], 1, 1));
+    const { result } = renderSearch();
+    await waitFor(() => expect(mockListModels).toHaveBeenCalled());
+
+    act(() => result.current.onSearchChange('[llama'));
+
+    await waitFor(() =>
+      expect(mockListModels).toHaveBeenLastCalledWith(
+        'ws1',
+        expect.objectContaining({ filter: { name: { $like: '%[llama' } } })
       )
     );
   });
@@ -130,5 +158,158 @@ describe('useModelSearchCore', () => {
 
     await waitFor(() => expect(result.current.models.map((m) => m.name)).toEqual(['a', 'b']));
     expect(result.current.hasMore).toBe(false);
+  });
+
+  describe('model filters', () => {
+    it('sends each filter as an any-of list alongside caller filters', async () => {
+      mockListModels.mockResolvedValue(makePage([makeModel('a')], 1, 1));
+      const { result } = renderSearch({ filter: { lora_enabled: true } });
+      await waitFor(() => expect(mockListModels).toHaveBeenCalled());
+
+      act(() =>
+        result.current.modelFilters.onChange({
+          providers: ['ws1/build', 'ws1/local'],
+          capabilities: ['tool_calling', 'reasoning'],
+          inputModalities: ['image'],
+        })
+      );
+
+      await waitFor(() =>
+        expect(mockListModels).toHaveBeenLastCalledWith(
+          'ws1',
+          expect.objectContaining({
+            filter: {
+              lora_enabled: true,
+              model_providers: { $in: ['ws1/build', 'ws1/local'] },
+              capabilities: { $in: ['tool_calling', 'reasoning'] },
+              input_modalities: { $in: ['image'] },
+            },
+          })
+        )
+      );
+    });
+
+    it('sends a single provider as a plain equality', async () => {
+      mockListModels.mockResolvedValue(makePage([makeModel('a')], 1, 1));
+
+      renderSearch({ initialFilters: { providers: ['ws1/build'] } });
+
+      await waitFor(() =>
+        expect(mockListModels).toHaveBeenCalledWith(
+          'ws1',
+          expect.objectContaining({ filter: { model_providers: 'ws1/build' } })
+        )
+      );
+    });
+
+    it('drops the filters when the workspace changes', async () => {
+      mockListModels.mockResolvedValue(makePage([makeModel('a')], 1, 1));
+      const { result, rerender } = renderHook(
+        ({ workspace }) => useModelSearchCore({ workspace, listModels: mockListModels }),
+        { wrapper: createWrapper(), initialProps: { workspace: 'ws1' } }
+      );
+      act(() => result.current.modelFilters.onChange({ providers: ['ws1/build'] }));
+      await waitFor(() => expect(result.current.modelFilters.values.providers).toHaveLength(1));
+
+      rerender({ workspace: 'ws2' });
+
+      expect(result.current.modelFilters.values).toEqual({});
+      await waitFor(() =>
+        expect(mockListModels).toHaveBeenLastCalledWith(
+          'ws2',
+          expect.not.objectContaining({ filter: expect.anything() })
+        )
+      );
+    });
+
+    it('keeps the filters dropped after returning to the earlier workspace', async () => {
+      mockListModels.mockResolvedValue(makePage([makeModel('a')], 1, 1));
+      const { result, rerender } = renderHook(
+        ({ workspace }) => useModelSearchCore({ workspace, listModels: mockListModels }),
+        { wrapper: createWrapper(), initialProps: { workspace: 'ws1' } }
+      );
+      act(() => result.current.modelFilters.onChange({ providers: ['ws1/build'] }));
+      await waitFor(() => expect(result.current.modelFilters.values.providers).toHaveLength(1));
+
+      rerender({ workspace: 'ws2' });
+      rerender({ workspace: 'ws1' });
+
+      expect(result.current.modelFilters.values).toEqual({});
+    });
+
+    it('lists providers from every page', async () => {
+      mockListProviders
+        .mockResolvedValueOnce({
+          data: [{ workspace: 'ws1', name: 'a' }],
+          pagination: { total_pages: 2 },
+        } as unknown as ModelProvidersPage)
+        .mockResolvedValueOnce({
+          data: [{ workspace: 'ws1', name: 'b' }],
+          pagination: { total_pages: 2 },
+        } as unknown as ModelProvidersPage);
+      mockListModels.mockResolvedValue(makePage([makeModel('a')], 1, 1));
+
+      const { result } = renderSearch();
+
+      await waitFor(() =>
+        expect(result.current.modelFilters.providerOptions.map((option) => option.value)).toEqual([
+          'ws1/a',
+          'ws1/b',
+        ])
+      );
+    });
+
+    it('sends the size as a parameter count range', async () => {
+      mockListModels.mockResolvedValue(makePage([makeModel('mid')], 1, 1));
+
+      renderSearch({ initialFilters: { sizes: ['medium'] } });
+
+      await waitFor(() =>
+        expect(mockListModels).toHaveBeenCalledWith(
+          'ws1',
+          expect.objectContaining({
+            filter: { parameter_count: { $gte: 3_000_000_000, $lt: 10_000_000_000 } },
+          })
+        )
+      );
+    });
+
+    it('leaves out filters whose lists are empty', async () => {
+      mockListModels.mockResolvedValue(makePage([makeModel('a')], 1, 1));
+
+      renderSearch({ initialFilters: { providers: [], capabilities: [], sizes: [] } });
+
+      await waitFor(() =>
+        expect(mockListModels).toHaveBeenCalledWith(
+          'ws1',
+          expect.not.objectContaining({ filter: expect.anything() })
+        )
+      );
+    });
+
+    it('lists providers as workspace-qualified options', async () => {
+      mockListProviders.mockResolvedValue({
+        data: [{ workspace: 'default', name: 'nvidia-build' }],
+      } as unknown as ModelProvidersPage);
+      mockListModels.mockResolvedValue(makePage([makeModel('a')], 1, 1));
+
+      const { result } = renderSearch();
+
+      await waitFor(() =>
+        expect(result.current.modelFilters.providerOptions).toEqual([
+          { value: 'default/nvidia-build', label: 'nvidia-build' },
+        ])
+      );
+    });
+
+    it('offers a selected provider the list does not include', async () => {
+      mockListModels.mockResolvedValue(makePage([makeModel('a')], 1, 1));
+
+      const { result } = renderSearch({ initialFilters: { providers: ['other/gone'] } });
+
+      expect(result.current.modelFilters.providerOptions).toEqual([
+        { value: 'other/gone', label: 'other/gone' },
+      ]);
+    });
   });
 });

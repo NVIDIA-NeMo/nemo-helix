@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { hasActiveModelFilters } from '@nemo/common/src/api/models/modelFilters';
+import { ModelDropdownFilters } from '@nemo/common/src/components/ModelSelectV2/ModelDropdownFilters';
 import { ModelDropdownList } from '@nemo/common/src/components/ModelSelectV2/ModelDropdownList';
 import { ModelDropdownSearch } from '@nemo/common/src/components/ModelSelectV2/ModelDropdownSearch';
 import type {
@@ -33,6 +35,9 @@ const MODEL_TYPE_ITEMS = [
 
 const DEFAULT_SEARCH_DEBOUNCE_MS = 300;
 
+const NO_FILTER_MATCHES_MESSAGE = 'No models match these filters';
+const LOAD_FAILED_MESSAGE = "Couldn't load models";
+
 const isCustomModel = (model: ModelEntity): boolean => !isBaseModel(model);
 
 type ModelDropdownProps = Omit<
@@ -54,12 +59,14 @@ export const ModelDropdown: FC<ModelDropdownProps> = ({
   isLoadingMore = false,
   doneLoadingMessage,
   emptyMessage,
+  error,
   loading = false,
   disabled = false,
   placeholder = 'Select a model',
   showModelTypeToggle = false,
   defaultModelType = 'custom',
   onModelTypeChange,
+  modelFilters,
   hideAdapters = false,
   fullWidth = false,
   dropdownSide = 'bottom',
@@ -130,6 +137,13 @@ export const ModelDropdown: FC<ModelDropdownProps> = ({
     }
   };
 
+  let listEmptyMessage = emptyMessage;
+  if (error) {
+    listEmptyMessage = LOAD_FAILED_MESSAGE;
+  } else if (modelFilters && hasActiveModelFilters(modelFilters.values)) {
+    listEmptyMessage = NO_FILTER_MATCHES_MESSAGE;
+  }
+
   const selectedParts = value?.model ? getPartsFromReference(value.model) : undefined;
   const selectedName = selectedModel?.name ?? (selectedParts?.name || value?.model);
   const selectedWorkspace =
@@ -179,8 +193,8 @@ export const ModelDropdown: FC<ModelDropdownProps> = ({
         align="start"
         side={dropdownSide}
         data-testid="model-select-v2-content"
-        className="min-w-[360px] min-h-[200px]"
-        style={{ width: 360 }} // eslint-disable-line no-restricted-syntax -- KUI DropdownContent needs explicit width
+        className="min-w-[400px] min-h-[200px]"
+        style={{ width: 400 }} // eslint-disable-line no-restricted-syntax -- KUI DropdownContent needs explicit width
       >
         {open && (
           <>
@@ -195,6 +209,7 @@ export const ModelDropdown: FC<ModelDropdownProps> = ({
                 />
               </Flex>
             )}
+            {modelFilters ? <ModelDropdownFilters {...modelFilters} /> : null}
             <ModelDropdownList
               groups={filteredGroups}
               value={value}
@@ -205,7 +220,7 @@ export const ModelDropdown: FC<ModelDropdownProps> = ({
               hasMore={hasMore}
               isLoadingMore={isLoadingMore}
               doneLoadingMessage={doneLoadingMessage}
-              emptyMessage={emptyMessage}
+              emptyMessage={listEmptyMessage}
             />
           </>
         )}

@@ -5,7 +5,9 @@ import { QUERY_PREFIX_PLATFORM } from '@nemo/common/src/constants/api';
 import type {
   ModelEntity,
   ModelEntitysPage,
+  ModelProvidersPage,
   ModelsListModelsParams,
+  ModelsListProvidersParams,
 } from '@nemo/sdk/generated/platform/schema';
 
 /**
@@ -49,3 +51,14 @@ export const buildWorkspaceGroup = (
   workspace: workspaceName,
   models: [...models].sort((a, b) => (a.name ?? '').localeCompare(b.name ?? '')),
 });
+
+export type ListProviders = (
+  workspace: string,
+  params: ModelsListProvidersParams
+) => Promise<ModelProvidersPage>;
+
+// Starts with the generated providers query key so provider create/edit/delete invalidate it.
+export const getQueryKeyModelProviderOptions = (workspace: string) => [
+  `/apis/models/v2/workspaces/${workspace}/providers`,
+  'filter-options',
+];
