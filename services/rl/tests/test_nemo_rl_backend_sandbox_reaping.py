@@ -46,6 +46,7 @@ for _name in _stubbed:
     del sys.modules[_name]
 
 JOB_ID = "rl-job-1"
+JOB_UID = "2b7e9c4d-8f1a-4c3e-b5d6-a7f8e9d0c1b2"
 
 
 class _Recorder:
@@ -105,16 +106,20 @@ def _execute(
     exit_code: int = 0,
     gym: Any = None,
     during_driver: Any = None,
+    job_uid: str | None = JOB_UID,
+    rank: int = 0,
 ) -> None:
     """Run ``execute_training`` against a fake Ray bootstrap, with an optional hook while the driver runs."""
 
     def run_with_driver(script: str, args: list[str]) -> int:
-        """Run the in-flight hook, then return the configured exit code."""
+        """Record the run, call the in-flight hook, then return the configured exit code."""
+        recorder.events.append("driver")
         if during_driver is not None:
             during_driver()
         return exit_code
 
     bootstrap = SimpleNamespace(
+        rank=rank,
         progress=None,
         node_env={},
         driver_output=deque(["RuntimeError: driver failed"]),
@@ -122,7 +127,7 @@ def _execute(
         terminate_driver=recorder.terminate,
     )
     monkeypatch.setattr(backend_module, "create_bootstrap_from_env", lambda: bootstrap)
-    backend = backend_module.NemoRLBackend(cast(NHXJobContext, SimpleNamespace(job_id=JOB_ID)))
+    backend = backend_module.NemoRLBackend(cast(NHXJobContext, SimpleNamespace(job_id=JOB_ID, job_uid=job_uid)))
     config: Any = SimpleNamespace(
         parallelism=SimpleNamespace(num_gpus_per_node=1, num_nodes=1),
         integrations=None,
@@ -145,17 +150,17 @@ def _sandboxed_gym(**overrides: Any) -> SimpleNamespace:
 def test_a_finished_sandboxed_job_is_swept_with_its_own_job_id_and_connection_options(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, recorder: _Recorder
 ) -> None:
-    """A normal exit sweeps once with the job id and connection options."""
+    """A normal run sweeps before the driver starts and after it exits, with the job id and connection options."""
     _execute(tmp_path, monkeypatch, recorder, gym=_sandboxed_gym())
 
-    assert recorder.reap_calls == [
-        {
-            "job_id": JOB_ID,
-            "host_provider": "opensandbox",
-            "host_provider_options": {"connection": {"protocol": "http"}},
-            "timeout_s": backend_module.SANDBOX_REAP_TIMEOUT_S,
-        }
-    ]
+    sweep = {
+        "job_id": JOB_UID,
+        "host_provider": "opensandbox",
+        "host_provider_options": {"connection": {"protocol": "http"}},
+        "timeout_s": backend_module.SANDBOX_REAP_TIMEOUT_S,
+    }
+    assert recorder.reap_calls == [sweep, sweep]
+    assert recorder.events == ["reap", "driver", "reap"]
 
 
 def test_a_driver_crash_still_sweeps_and_still_reports_the_failure(
@@ -165,7 +170,7 @@ def test_a_driver_crash_still_sweeps_and_still_reports_the_failure(
     with pytest.raises(CustomizerTrainingError):
         _execute(tmp_path, monkeypatch, recorder, exit_code=1, gym=_sandboxed_gym())
 
-    assert len(recorder.reap_calls) == 1
+    assert recorder.events == ["reap", "driver", "reap"]
 
 
 def test_a_cancel_reaps_before_it_waits_on_the_driver(
@@ -184,7 +189,7 @@ def test_a_cancel_reaps_before_it_waits_on_the_driver(
 
     # The handler reaps then terminates the driver, then the ``finally`` sweeps once more for
     # anything created while the driver was shutting down.
-    assert recorder.events == ["reap", "terminate_driver", "reap"]
+    assert recorder.events == ["reap", "driver", "reap", "terminate_driver", "reap"]
 
 
 @pytest.mark.parametrize("gym", [None, _sandboxed_gym(sandboxed=False)], ids=["no-gym", "not-sandboxed"])
@@ -205,7 +210,8 @@ def test_a_failing_sweep_does_not_change_the_training_outcome(
 
     _execute(tmp_path, monkeypatch, recorder, gym=_sandboxed_gym())
 
-    assert len(recorder.reap_calls) == 1
+    # The sweep before the driver failed too, and the driver still ran.
+    assert recorder.events == ["reap", "driver", "reap"]
 
 
 def test_a_task_environment_without_the_reaper_module_degrades_to_a_logged_error(
@@ -233,8 +239,8 @@ def test_a_cancel_restores_default_signal_actions_before_any_blocking_work(
     with pytest.raises(SystemExit):
         _execute(tmp_path, monkeypatch, recorder, gym=_sandboxed_gym(), during_driver=_cancel)
 
-    # The first sweep runs inside the handler, before it waits on the driver.
-    assert recorder.signal_actions_during_sweep[0] == (signal.SIG_DFL, signal.SIG_DFL)
+    # The handler's sweep (after the one before the driver) runs before it waits on the driver.
+    assert recorder.signal_actions_during_sweep[1] == (signal.SIG_DFL, signal.SIG_DFL)
 
 
 def test_a_cancel_shares_one_shutdown_budget_between_the_sweeps_and_the_driver_wait(
@@ -247,7 +253,7 @@ def test_a_cancel_shares_one_shutdown_budget_between_the_sweeps_and_the_driver_w
     with pytest.raises(SystemExit):
         _execute(tmp_path, monkeypatch, recorder, gym=_sandboxed_gym(), during_driver=_cancel)
 
-    first, second = recorder.reap_calls
+    _, first, second = recorder.reap_calls
     assert first["timeout_s"] == backend_module.SANDBOX_REAP_TIMEOUT_S
     # 25s budget - 8s spent - 5s kill allowance = 12s for the driver to exit.
     assert recorder.terminate_calls == [(signal.SIGTERM, 12)]
@@ -264,4 +270,23 @@ def test_a_sweep_after_the_shutdown_budget_is_spent_is_skipped(
     with pytest.raises(SystemExit):
         _execute(tmp_path, monkeypatch, recorder, gym=_sandboxed_gym(), during_driver=_cancel)
 
-    assert len(recorder.reap_calls) == 1
+    # The sweep before the driver and the handler's; the ``finally`` one is skipped.
+    assert len(recorder.reap_calls) == 2
+
+
+def test_only_the_head_sweeps_before_the_driver(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, recorder: _Recorder
+) -> None:
+    """A worker can join after the head's driver has created this run's sandboxes; it must not sweep them first."""
+    _execute(tmp_path, monkeypatch, recorder, gym=_sandboxed_gym(), rank=1)
+
+    assert recorder.events == ["driver", "reap"]
+
+
+def test_without_the_jobs_unique_id_nothing_is_swept(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, recorder: _Recorder
+) -> None:
+    """The sandboxes carry the job's unique id; sweeping by the name could reach another workspace's job."""
+    _execute(tmp_path, monkeypatch, recorder, gym=_sandboxed_gym(), job_uid=None)
+
+    assert recorder.reap_calls == []

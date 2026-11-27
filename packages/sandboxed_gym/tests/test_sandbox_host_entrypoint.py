@@ -137,40 +137,17 @@ def test_opensandbox_host_provider_preserves_configured_entrypoint():
 
 @requires_opensandbox
 def test_opensandbox_host_provider_installs_agent_bundle():
-    from sandboxed_gym.host.opensandbox import _BUNDLE_LAUNCHER, AGENT_BUNDLE_EXTENSION_KEY, OpenSandboxGymHostProvider
+    """The runtime image starts as usual; the runtime checks the agent once it has dropped privileges."""
+    from sandboxed_gym.host.opensandbox import AGENT_BUNDLE_EXTENSION_KEY, OpenSandboxGymHostProvider
+    from sandboxed_gym.runtime.agent_bundle import AGENT_EXECUTABLE_ENV_KEY
 
     bundle = {"image": "nvcr.io/x/codex:1", "installer": "/install", "entrypoint": "bin/codex"}
     provider = OpenSandboxGymHostProvider(connection={"domain": "x", "api_key": "k"}, agent_bundle=bundle)
     sandbox_spec = provider._to_sandbox_spec(_gym_host_spec(entrypoint=("custom-runtime", "--serve")))
 
     assert json.loads(sandbox_spec.provider_options["extensions"][AGENT_BUNDLE_EXTENSION_KEY]) == bundle
-    assert sandbox_spec.entrypoint == [
-        "/bin/sh",
-        "-c",
-        _BUNDLE_LAUNCHER,
-        "/installed-agent/bin/codex",
-        "custom-runtime",
-        "--serve",
-    ]
-
-
-def test_bundle_launcher_puts_agent_on_path_and_fails_fast(tmp_path):
-    from sandboxed_gym.host.opensandbox import _BUNDLE_LAUNCHER
-
-    agent = tmp_path / "bin" / "codex"
-    agent.parent.mkdir()
-    agent.write_text("#!/bin/sh\necho 1.0\n")
-    agent.chmod(0o755)
-    run = [_BUNDLE_LAUNCHER, str(agent), "/bin/sh", "-c", "command -v codex"]
-
-    ok = subprocess.run(["/bin/sh", "-c", *run], capture_output=True, text=True, check=False)
-    assert ok.returncode == 0
-    assert ok.stdout.strip() == str(agent)
-
-    agent.write_text("#!/bin/sh\nexit 3\n")
-    broken = subprocess.run(["/bin/sh", "-c", *run], capture_output=True, text=True, check=False)
-    assert broken.returncode != 0
-    assert broken.stdout == ""
+    assert sandbox_spec.entrypoint == ["custom-runtime", "--serve"]
+    assert sandbox_spec.env[AGENT_EXECUTABLE_ENV_KEY] == "/installed-agent/bin/codex"
 
 
 # --------------------------------------------------------------------------------------------
@@ -362,6 +339,172 @@ def test_a_program_on_the_jobs_path_cannot_read_the_token_from_the_launchers_ini
     launcher_environ = (tmp_path / "launcher-environ").read_bytes()
     assert launcher_environ
     assert b"sandbox-token" not in launcher_environ
+
+
+def test_the_agent_bundle_is_checked_before_the_jobs_variables_arrive(tmp_path: Path) -> None:
+    """This script has no privileged setup, so it checks the agent first, as the launcher that ran it did.
+
+    The agent runs with its own directory first on PATH and none of the job's variables; the job's PATH then
+    replaces PATH, and the runtime never sees the name, so it doesn't check again.
+    """
+    from sandboxed_gym.runtime.gym_host_runtime import encode_job_env
+
+    paths = _fake_host(tmp_path)
+    (paths["venv"] / "bin" / "python").write_text(f'#!/bin/sh\nenv > "{tmp_path / "python-env"}"\n', encoding="utf-8")
+    agent_bin = tmp_path / "installed-agent" / "bin"
+    agent_bin.mkdir(parents=True)
+    agent = agent_bin / "codex"
+    agent.write_text(f'#!/bin/sh\nenv > "{tmp_path / "agent-env"}"\necho codex 1.0\n', encoding="utf-8")
+    agent.chmod(0o755)
+    # Passes straight through, so the test doesn't depend on the host having coreutils `timeout`.
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    (tools / "timeout").write_text('#!/bin/sh\nshift 3\nexec "$@"\n', encoding="utf-8")
+    (tools / "timeout").chmod(0o755)
+
+    def run(agent_script: str) -> subprocess.CompletedProcess:
+        agent.write_text(agent_script, encoding="utf-8")
+        return subprocess.run(
+            [
+                "/bin/sh",
+                str(gym_host_script_path(git_root=str(paths["root"]))),
+                str(paths["venv"]),
+                str(paths["root"]),
+                str(tmp_path / "gym-src" / "Gym"),
+                str(paths["runtime"]),
+            ],
+            env={
+                **os.environ,
+                "PATH": f"{tools}:{os.environ['PATH']}",
+                "SANDBOXED_GYM_TREE": str(paths["tree"]),
+                "NHX_GYM_AGENT_EXECUTABLE": str(agent),
+                "NHX_GYM_JOB_ENV": encode_job_env({"PATH": "/job/bin:/usr/bin:/bin", "JOB_ONLY": "1"}),
+            },
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+
+    result = run(f'#!/bin/sh\nenv > "{tmp_path / "agent-env"}"\necho codex 1.0\n')
+
+    assert result.returncode == 0, result.stderr
+    assert "codex 1.0" in result.stderr
+    agent_env = dict(line.split("=", 1) for line in (tmp_path / "agent-env").read_text().splitlines() if "=" in line)
+    runtime_env = dict(line.split("=", 1) for line in (tmp_path / "python-env").read_text().splitlines() if "=" in line)
+    assert agent_env["PATH"].split(":")[0] == str(agent_bin)
+    assert "JOB_ONLY" not in agent_env
+    assert runtime_env["PATH"] == "/job/bin:/usr/bin:/bin"
+    assert "NHX_GYM_AGENT_EXECUTABLE" not in runtime_env
+
+    (tmp_path / "python-env").unlink()
+    broken = run("#!/bin/sh\nexit 3\n")
+    assert broken.returncode != 0
+    assert not (tmp_path / "python-env").exists()
+
+
+def test_the_agent_bundle_check_has_a_deadline(tmp_path: Path) -> None:
+    """A hanging agent stops the script instead of holding it until the caller's readiness timeout."""
+    paths = _fake_host(tmp_path)
+    agent = tmp_path / "installed-agent" / "bin" / "codex"
+    agent.parent.mkdir(parents=True)
+    agent.write_text("#!/bin/sh\necho codex 1.0\n", encoding="utf-8")
+    agent.chmod(0o755)
+    # Stands in for coreutils `timeout`, so the test doesn't wait out the real deadline.
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    (tools / "timeout").write_text(f'#!/bin/sh\nprintf \'%s\\n\' "$*" > "{tmp_path / "timeout-args"}"\nexit 124\n')
+    (tools / "timeout").chmod(0o755)
+    # A `timeout` in the bundle's own directory must not replace the system one.
+    (agent.parent / "timeout").write_text("#!/bin/sh\nexit 0\n")
+    (agent.parent / "timeout").chmod(0o755)
+
+    result = subprocess.run(
+        [
+            "/bin/sh",
+            str(gym_host_script_path(git_root=str(paths["root"]))),
+            str(paths["venv"]),
+            str(paths["root"]),
+            str(tmp_path / "gym-src" / "Gym"),
+            str(paths["runtime"]),
+        ],
+        env={
+            **os.environ,
+            "PATH": f"{tools}:{os.environ['PATH']}",
+            "SANDBOXED_GYM_TREE": str(paths["tree"]),
+            "NHX_GYM_AGENT_EXECUTABLE": str(agent),
+        },
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+
+    assert result.returncode == 124
+    assert (tmp_path / "timeout-args").read_text() == f"-k 10 120 {agent} --version\n"
+
+
+def test_the_agent_bundle_check_needs_a_deadline_it_can_enforce(tmp_path: Path) -> None:
+    """Without coreutils `timeout` the check could hang the host, so the script refuses to run it."""
+    paths = _fake_host(tmp_path)
+    agent = tmp_path / "installed-agent" / "bin" / "codex"
+    agent.parent.mkdir(parents=True)
+    agent.write_text(f'#!/bin/sh\ntouch "{tmp_path / "agent-ran"}"\n', encoding="utf-8")
+    agent.chmod(0o755)
+    no_tools = tmp_path / "no-tools"
+    no_tools.mkdir()
+
+    result = subprocess.run(
+        ["/bin/sh", str(gym_host_script_path(git_root=str(paths["root"]))), str(paths["venv"]), str(paths["root"])],
+        env={"PATH": str(no_tools), "NHX_GYM_AGENT_EXECUTABLE": str(agent)},
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+
+    assert result.returncode == 1
+    assert "needs coreutils timeout" in result.stderr
+    assert not (tmp_path / "agent-ran").exists()
+
+
+def test_an_image_with_a_container_engine_is_refused(tmp_path: Path) -> None:
+    """That image starts as root for its setup; this script would run the agent and unpack the job's PATH first."""
+    from sandboxed_gym.runtime.gym_host_runtime import encode_job_env
+
+    paths = _fake_host(tmp_path)
+    (paths["venv"] / "bin" / "python").write_text(f'#!/bin/sh\ntouch "{tmp_path / "runtime-ran"}"\n', encoding="utf-8")
+    agent = tmp_path / "installed-agent" / "bin" / "codex"
+    agent.parent.mkdir(parents=True)
+    agent.write_text(f'#!/bin/sh\ntouch "{tmp_path / "agent-ran"}"\n', encoding="utf-8")
+    agent.chmod(0o755)
+    job_bin = tmp_path / "job-bin"
+    job_bin.mkdir()
+    (job_bin / "python3").write_text(f'#!/bin/sh\ntouch "{tmp_path / "job-python-ran"}"\n', encoding="utf-8")
+    (job_bin / "python3").chmod(0o755)
+
+    result = subprocess.run(
+        [
+            "/bin/sh",
+            str(gym_host_script_path(git_root=str(paths["root"]))),
+            str(paths["venv"]),
+            str(paths["root"]),
+            str(tmp_path / "gym-src" / "Gym"),
+            str(paths["runtime"]),
+        ],
+        env={
+            **os.environ,
+            "SANDBOXED_GYM_TREE": str(paths["tree"]),
+            "NHX_GYM_AGENT_EXECUTABLE": str(agent),
+            "NHX_GYM_HOST_CONTAINER_ENGINE": "rootless-podman",
+            "NHX_GYM_JOB_ENV": encode_job_env({"PATH": f"{job_bin}:{os.environ['PATH']}"}),
+        },
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+
+    assert result.returncode == 1
+    assert "does not support an image with a container engine" in result.stderr
+    for marker in ("agent-ran", "job-python-ran", "runtime-ran"):
+        assert not (tmp_path / marker).exists(), marker
 
 
 def test_ray_head_starts_in_the_background_and_is_published(tmp_path: Path) -> None:

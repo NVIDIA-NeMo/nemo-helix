@@ -28,6 +28,7 @@ import sandboxed_gym.host.models as host_models
 from sandboxed_gym.config import BrokerEndpoint
 from sandboxed_gym.host.models import GymHostHandle
 from sandboxed_gym.orchestrator import RolloutTransportError, SandboxedGymSession
+from sandboxed_gym.run_sync import run_coro_sync
 from sandboxed_gym.serve_config import SandboxedGymServeConfig
 
 ROLLOUT_URL = "http://host/rollouts/run"
@@ -157,6 +158,42 @@ def test_a_batch_is_split_into_bounded_chunks(monkeypatch: pytest.MonkeyPatch) -
     assert sorted(len(chunk) for chunk in posted) == [1, 2, 2]
     assert sorted(row["id"] for chunk in posted for row in chunk) == list(range(5))
     assert len(results) == 3  # one stub result per chunk
+
+
+def test_each_chunk_reports_its_results_as_it_returns(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Progress follows the chunks: the caller sees results before the whole batch is back."""
+
+    def _post(self: SandboxedGymSession, chunk: list[dict]) -> list[Any]:
+        return [{"id": row["id"]} for row in chunk]
+
+    monkeypatch.setattr(SandboxedGymSession, "_post_chunk", _post)
+    reported: list[list[Any]] = []
+
+    async def on_results(results: list[Any]) -> None:
+        reported.append(results)
+
+    results = run_coro_sync(
+        _session(rollout_chunk_size=2).arun_rollouts([{"id": index} for index in range(5)], on_results=on_results)
+    )
+
+    assert sorted(len(chunk) for chunk in reported) == [1, 2, 2]
+    assert sorted(result["id"] for chunk in reported for result in chunk) == list(range(5))
+    assert len(results) == 5
+
+
+def test_a_failing_results_callback_never_fails_the_batch(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    _responds(monkeypatch, [{"reward": 1.0}])
+
+    async def on_results(results: list[Any]) -> None:
+        raise RuntimeError("status details unreachable")
+
+    with caplog.at_level(logging.WARNING):
+        results = run_coro_sync(_session().arun_rollouts([{"id": 1}], on_results=on_results))
+
+    assert results == [{"reward": 1.0}]
+    assert "could not report its results' progress" in caplog.text
 
 
 def test_an_empty_batch_is_refused() -> None:

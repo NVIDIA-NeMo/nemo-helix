@@ -410,7 +410,7 @@ jobs:
         with:
           name: nhx-builder
           driver: docker-container
-          cleanup: true
+          cleanup: false
 
       - name: Resolve bake cache branch
         id: cache-branch
@@ -497,7 +497,7 @@ jobs:
         with:
           name: nhx-builder
           driver: docker-container
-          cleanup: true
+          cleanup: false
 
       - name: Resolve bake cache branch
         id: cache-branch
@@ -874,8 +874,10 @@ jobs:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
           PYTEST_WORKERS: "4"
           PYTEST_EXTRA: --unit-group=${{ matrix.group }}
-          # coverage-comment reads only py3.12; tracing the other legs only slows them.
-          PYTEST_COVERAGE: ${{ matrix.python-version == '3.12' }}
+          # coverage-comment reads only py3.14; tracing the other legs only slows them. With
+          # `branch = true`, coverage can use sys.monitoring only on 3.14+; 3.12 and 3.13 fall
+          # back to the much slower CTracer.
+          PYTEST_COVERAGE: ${{ matrix.python-version == '3.14' }}
           _TYPER_FORCE_DISABLE_TERMINAL: "1"
       - name: Upload test artifacts
         if: always()
@@ -1165,6 +1167,9 @@ jobs:
           persist-credentials: false
       - name: Free disk space
         uses: ./.github/actions/free-disk-space
+        with:
+          # Peak disk use is about 6 GiB (measured in PR #4352) plus 20 GiB; a runner starts with about 86 free.
+          min_free_gb: "26"
       - name: Download policy WASM
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -1242,6 +1247,9 @@ jobs:
           persist-credentials: false
       - name: Free disk space
         uses: ./.github/actions/free-disk-space
+        with:
+          # Peak disk use is about 6 GiB (measured in PR #4352) plus 20 GiB; a runner starts with about 86 free.
+          min_free_gb: "26"
       - name: Download policy WASM
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -1533,7 +1541,7 @@ jobs:
         run: pnpm run --recursive --parallel --if-present typecheck
 
   web-test:
-    name: Web tests (${{ matrix.shard }}/4)
+    name: Web tests (${{ matrix.shard }})
     needs: [changes]
     if: >
       !cancelled() && (
@@ -1544,7 +1552,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
+        # Studio splits four ways. The other packages (mostly @nemo/common, ~170 s) get their own
+        # job: run before a Studio shard, they made that shard the last web job in most runs.
+        shard: [studio 1/4, studio 2/4, studio 3/4, studio 4/4, other packages]
     defaults:
       run:
         working-directory: web
@@ -1569,11 +1579,10 @@ jobs:
               filters+=(--filter=nemo-studio-ui)
             fi
           fi
-          if [ "${SHARD}" = 1 ]; then
+          if [ "${SHARD}" = "other packages" ]; then
             pnpm "${filters[@]}" --filter='!nemo-studio-ui' run --parallel --if-present test:ci
-          fi
-          if pnpm "${filters[@]}" ls --depth -1 --json | jq -e 'any(.[]; .name == "nemo-studio-ui")' > /dev/null; then
-            pnpm --filter nemo-studio-ui run test:ci --shard="${SHARD}/4"
+          elif pnpm "${filters[@]}" ls --depth -1 --json | jq -e 'any(.[]; .name == "nemo-studio-ui")' > /dev/null; then
+            pnpm --filter nemo-studio-ui run test:ci --shard="${SHARD#studio }"
           else
             echo "nemo-studio-ui is unaffected by this change; skipping."
           fi
@@ -1991,7 +2000,7 @@ jobs:
         with:
           # One interpreter's groups, so the coverage table stays a single number. The combine
           # step below renders "N/A" unless every group's data is present.
-          pattern: python-unit-test-results-py3.12-*
+          pattern: python-unit-test-results-py3.14-*
           path: unit-coverage/groups
       - name: Download integration test coverage
         continue-on-error: true
@@ -2007,14 +2016,16 @@ jobs:
           enable-cache: false
       - name: Combine unit coverage
         # Never report one group's coverage as coverage of the whole suite.
+        # Report on the interpreter that measured: 3.14 compiles no code for bare class-body
+        # annotations (PEP 649), so an older parser counts them as statements that never ran.
         continue-on-error: true
         shell: bash
         run: |
           for group in core plugins misc; do
-            test -s "unit-coverage/groups/python-unit-test-results-py3.12-${group}/.coverage"
+            test -s "unit-coverage/groups/python-unit-test-results-py3.14-${group}/.coverage"
           done
-          uvx --from coverage==7.15.3 coverage combine --keep unit-coverage/groups/*/.coverage
-          uvx --from coverage==7.15.3 coverage xml -o unit-coverage/coverage.xml
+          uvx --python 3.14 --from coverage==7.15.3 coverage combine --keep unit-coverage/groups/*/.coverage
+          uvx --python 3.14 --from coverage==7.15.3 coverage xml -o unit-coverage/coverage.xml
       - name: Combine integration coverage
         # Never report one group's coverage as coverage of the whole suite.
         continue-on-error: true

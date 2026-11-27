@@ -26,6 +26,7 @@ from sandboxed_gym.host.models import (
     render_host_error,
 )
 from sandboxed_gym.host.opensandbox import OpenSandboxGymHostProvider, _create_options_for_host, host_disk_request_gib
+from sandboxed_gym.runtime.agent_bundle import AGENT_BUNDLE_FEATURE
 
 HEALTH_URL = "https://sandbox.example/gym-1/health"
 ROLLOUT_URL = "https://sandbox.example/gym-1/rollouts/run"
@@ -266,3 +267,45 @@ def test_a_rendered_error_keeps_every_line_the_host_sent() -> None:
     assert "line 0" in rendered
     assert "line 79" in rendered
     assert "(80 lines)" in rendered
+
+
+BUNDLE = {"image": "nvcr.io/x/codex:1", "installer": "/install", "entrypoint": "bin/codex"}
+
+
+@pytest.mark.parametrize(
+    ("agent_bundle", "health"),
+    [
+        (BUNDLE, {"status": "ready", "features": [AGENT_BUNDLE_FEATURE]}),
+        (None, {"status": "ready"}),  # an older host image is fine when no bundle is configured
+    ],
+    ids=["bundle-supported", "no-bundle"],
+)
+def test_a_ready_host_passes_when_it_handles_the_configured_bundle(
+    agent_bundle: dict[str, str] | None, health: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    provider = OpenSandboxGymHostProvider(connection={"domain": "x", "api_key": "k"}, agent_bundle=agent_bundle)
+    monkeypatch.setattr(provider, "_get_json", lambda handle: health)
+
+    asyncio.run(provider.wait_ready(_handle(), timeout_s=30))
+
+
+@pytest.mark.parametrize("features", [None, [], ["something_else"]])
+def test_a_host_image_without_bundle_support_fails_fast(
+    features: list[str] | None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An older host image ignores the bundle, so its Gym would install a different CLI at the first rollout."""
+    provider = OpenSandboxGymHostProvider(connection={"domain": "x", "api_key": "k"}, agent_bundle=BUNDLE)
+    polls = 0
+
+    def _ready(handle: Any) -> dict[str, Any]:
+        nonlocal polls
+        polls += 1
+        return {"status": "ready"} if features is None else {"status": "ready", "features": features}
+
+    monkeypatch.setattr(provider, "_get_json", _ready)
+
+    with pytest.raises(GymHostBootstrapFailed, match="without agent bundle support") as excinfo:
+        asyncio.run(provider.wait_ready(_handle(), timeout_s=30))
+
+    assert polls == 1
+    assert "bin/codex" in str(excinfo.value)

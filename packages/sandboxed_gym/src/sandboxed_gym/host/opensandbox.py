@@ -27,6 +27,7 @@ from sandboxed_gym.host.models import (
 )
 from sandboxed_gym.opensandbox_policy import create_options_with_policy
 from sandboxed_gym.quantity import quantity_bytes, quantity_gib_rounded_up
+from sandboxed_gym.runtime.agent_bundle import AGENT_BUNDLE_FEATURE, AGENT_EXECUTABLE_ENV_KEY
 
 LOGGER = logging.getLogger(__name__)
 
@@ -38,8 +39,6 @@ _DEFAULT_RUNTIME_ENTRYPOINT = ("python", "-I", "-u", "-m", "sandboxed_gym.runtim
 # Match nhx_sandbox.harbor_opensandbox_services, which this package does not depend on.
 AGENT_BUNDLE_EXTENSION_KEY = "opensandbox.extensions.nemo-agent-bundle"
 INSTALLED_AGENT_DIR = "/installed-agent"
-# Prepends the agent's directory to the image's PATH, then fails the host at once if the agent can't run.
-_BUNDLE_LAUNCHER = 'export PATH="${0%/*}:$PATH" && "$0" --version >&2 && exec "$@"'
 #: The OpenSandbox server's auth header, and the variable the SDK reads its key from when the
 #: connection names none. Spelled out so the provider still imports without the SDK.
 OPEN_SANDBOX_API_KEY_HEADER = "OPEN-SANDBOX-API-KEY"
@@ -224,18 +223,20 @@ class OpenSandboxGymHostProvider:
         # Gym host explicitly while still allowing runtime images to configure their own command.
         entrypoint = list(spec.entrypoint or _DEFAULT_RUNTIME_ENTRYPOINT)
         provider_options: dict[str, Any] = {"volumes": volumes}
+        env = dict(spec.bootstrap_env)
         if self._agent_bundle is not None:
             # ponytail: no extension health check. A server without bundle support starts the host with no
-            # agent, the launcher's --version fails, and the readiness wait reports it. Harbor checks
+            # agent, its --version check fails, and the readiness wait reports it. Harbor checks
             # /v1/nemo-ext/health first; do the same if that timeout turns out to be too slow a signal.
             provider_options["extensions"] = {AGENT_BUNDLE_EXTENSION_KEY: json.dumps(self._agent_bundle)}
-            executable = f"{INSTALLED_AGENT_DIR}/{self._agent_bundle['entrypoint']}"
-            entrypoint = ["/bin/sh", "-c", _BUNDLE_LAUNCHER, executable, *entrypoint]
+            # The runtime checks it with --version and puts its directory first on PATH after dropping any
+            # privileges; a shell launcher here would run the agent as root on the Docker-enabled image.
+            env[AGENT_EXECUTABLE_ENV_KEY] = f"{INSTALLED_AGENT_DIR}/{self._agent_bundle['entrypoint']}"
         return SandboxSpec(
             image=spec.runtime_image,
             ttl_s=spec.ttl_s,
             ready_timeout_s=spec.ready_timeout_s,
-            env=dict(spec.bootstrap_env),
+            env=env,
             metadata=metadata,
             resources=resources,
             entrypoint=entrypoint,
@@ -313,6 +314,7 @@ class OpenSandboxGymHostProvider:
             try:
                 body = await asyncio.to_thread(self._get_json, handle)
                 if body.get("status") == "ready":
+                    self._check_agent_bundle_support(handle, body)
                     return
                 if body.get("status") == "failed":
                     raise GymHostBootstrapFailed(
@@ -329,6 +331,19 @@ class OpenSandboxGymHostProvider:
         raise TimeoutError(
             f"job host {handle.host_id} at {handle.health_url} did not become ready within {timeout_s:g}s"
             + (f": {last_error}" if last_error is not None else "")
+        )
+
+    def _check_agent_bundle_support(self, handle: "GymHostHandle[OpenSandboxDriver]", body: dict[str, Any]) -> None:
+        """Refuse a host image that ignores the agent bundle, rather than let its Gym install another CLI."""
+        if self._agent_bundle is None:
+            return
+        features = body.get("features")
+        if isinstance(features, list) and AGENT_BUNDLE_FEATURE in features:
+            return
+        raise GymHostBootstrapFailed(
+            f"job host {handle.host_id} runs a Gym host image without agent bundle support: it would ignore "
+            f"the bundle's {self._agent_bundle['entrypoint']} and let Gym install its own agent CLI instead. "
+            "Use a Gym host image from this platform release."
         )
 
     def _get_json(self, handle: "GymHostHandle[OpenSandboxDriver]") -> dict[str, Any]:

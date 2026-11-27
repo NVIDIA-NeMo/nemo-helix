@@ -57,6 +57,7 @@ from time import sleep
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
+from nhx_evals_sdk.agent_eval.progress import TrialProgressListener, gather_or_cancel, tell
 from nhx_evals_sdk.agent_eval.runtimes.fabric import _common
 from nhx_evals_sdk.agent_eval.runtimes.fabric._sandbox_execution import SandboxExecution
 from nhx_evals_sdk.agent_eval.runtimes.fabric.env import (
@@ -154,6 +155,7 @@ class FabricAgentRuntime:
     Pass ``sandbox=`` to run each task inside a sandbox from that provider instead of on the host.
     ``image`` only applies there; ``base_dir`` only applies on the host. ``env_secrets`` works in
     both modes; local lookup uses :class:`LocalSecretResolver` unless ``secret_resolver`` is supplied.
+    ``progress`` is told how many trials a run produces and receives each one as its task finishes.
     """
 
     def __init__(
@@ -172,6 +174,7 @@ class FabricAgentRuntime:
         image: str | None = None,
         env_secrets: Mapping[str, SecretRef] | None = None,
         secret_resolver: EnvSecretSource | None = None,
+        progress: TrialProgressListener | None = None,
     ) -> None:
         if sandbox is None:
             if image is not None:
@@ -193,6 +196,7 @@ class FabricAgentRuntime:
         self._image = image
         self._env_secrets = dict(env_secrets or {})
         self._secret_resolver = secret_resolver if secret_resolver is not None else LocalSecretResolver()
+        self._progress = progress
         self._logged_shared_codex_home = False
         validate_fabric_env(self._config, self._env_secrets)
         if self._env_secrets and not isinstance(self._secret_resolver, EnvSecretSource):
@@ -323,14 +327,23 @@ class FabricAgentRuntime:
                     else:
                         assert host is not None
                         run = await self._run_task_on_host(*host, task, evidence_dir, skill_mode)
-                    return await self._finish_task(task, evidence_dir, run, skill_mode)
+                    trial = await self._finish_task(task, evidence_dir, run, skill_mode)
+                if self._progress is not None:
+                    await tell(self._progress.finished([trial]))
+                return trial
 
-            return await asyncio.gather(*(run_one(index, task) for index, task in enumerate(tasks)))
+            if self._progress is not None:
+                await tell(self._progress.planned(len(tasks)))
+            return await gather_or_cancel(run_one(index, task) for index, task in enumerate(tasks))
         finally:
-            if self._sandbox is not None:
-                # Each sandbox tears itself down; the provider is shared across the batch, so its
-                # process-wide resources are disposed once here, even when setup itself raised.
-                await self._sandbox.aclose()
+            try:
+                if self._sandbox is not None:
+                    # Each sandbox tears itself down; the provider is shared across the batch, so its
+                    # process-wide resources are disposed once here, even when setup itself raised.
+                    await self._sandbox.aclose()
+            finally:
+                if self._progress is not None:
+                    await tell(self._progress.stopped())
 
     def _open_host(self) -> tuple[Fabric, FabricConfig]:
         try:

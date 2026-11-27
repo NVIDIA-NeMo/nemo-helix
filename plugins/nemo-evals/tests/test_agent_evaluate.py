@@ -18,6 +18,7 @@ from urllib.parse import urlsplit
 
 import httpx
 import pytest
+from harbor.models.trial.config import TrialConfig
 from nemo_agents_plugin.jobs import gateway_proxy
 from nemo_evals.api.schemas import AgentRef, MetadataItem, MetricInline, TaskInputs, TasksetRef
 from nemo_evals.api.task_definitions.evaluator import ResolvedEvaluatorTaskDefinition
@@ -25,7 +26,7 @@ from nemo_evals.cli import EvaluatorPluginCLI
 from nemo_evals.config import EvaluatorConfig
 from nemo_evals.filesets import FilesetRef
 from nemo_evals.gateway.policy import ModelAccess, ModelPolicy
-from nemo_evals.jobs import agent_evaluate
+from nemo_evals.jobs import agent_evaluate, run_outcome
 from nemo_evals.jobs.agent_compiler import _environment
 from nemo_evals.jobs.agent_evaluate import (
     AGENT_BUNDLE_DIR,
@@ -66,11 +67,13 @@ from nemo_evals.jobs.publication import PublicationOutcome
 from nemo_evals.jobs.publication_spec import IntakePublicationSpec, PublicationSpec
 from nemo_evals.jobs.run_outcome import STATUS_DETAILS_KEY
 from nemo_evals.jobs.secret_env import JobEnvSecretSource, SecretEnvError
+from nemo_evals.jobs.trial_counter import GymTrialCounter, TrialCounter
 from nemo_evals.metric_refs import MetricRef
 from nemo_evals.shared.metric_bundles.bundles import MetricBundle, bundle_metric
 from nemo_evals.shared.metric_bundles.hybrid import HybridMetricBundlePackager
 from nemo_evals.tasks.agent_evaluate import main as agent_eval_task_main
 from nemo_evals.tasks.runner import SDK_INITIALIZATION_EXIT_CODE
+from nemo_evals.taskset_runs.trials import TRIAL_COUNTS_STATUS_KEY
 from nemo_helix_plugin.client.auth import StaticToken
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.client.errors import InternalServerError, NemoResponseValidationError, NemoTransportError
@@ -104,7 +107,7 @@ from nhx_evals_sdk.agent_eval.runtimes.gym.sandboxed import (
     SandboxedGymRuntimeConfig,
 )
 from nhx_evals_sdk.agent_eval.runtimes.harbor.env import harbor_env_templates
-from nhx_evals_sdk.agent_eval.runtimes.harbor.runtime import HarborAgentTaskRunner
+from nhx_evals_sdk.agent_eval.runtimes.harbor.runtime import HarborAgentTaskRunner, HarborRuntimeConfig
 from nhx_evals_sdk.agent_eval.scores import AgentEvalScoreStatus, AgentEvalTaskScore
 from nhx_evals_sdk.agent_eval.tasks import AgentEvalRunConfig, AgentEvalTask
 from nhx_evals_sdk.agent_eval.trials import (
@@ -640,6 +643,36 @@ def test_agent_eval_job_keeps_sandboxed_gym_evidence_inside_the_downloadable_bun
     assert json.loads(capture)["model_call_id"] == "c0"
 
 
+def test_a_gym_job_counts_its_rollouts_in_its_status_details(tmp_path: Path, mocker: MockerFixture) -> None:
+    _run_sandboxed_gym_job(_job_context(tmp_path), mocker)
+
+    resolve = AgentEvalJob._resolve_target
+    assert isinstance(resolve, Mock)
+    progress = resolve.call_args.kwargs["gym_progress"]
+    assert isinstance(progress, GymTrialCounter)
+    assert progress._reward_key == "reward"
+
+
+async def test_an_agent_eval_job_counts_its_harbor_trials_without_listing_them(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    reported: list[dict[str, Any]] = []
+    monkeypatch.setattr(run_outcome, "report_status_details", lambda details, **kwargs: reported.append(details))
+    harbor_job = MagicMock()
+    harbor_job._existing_trial_results = []
+    harbor_job._remaining_trial_configs = [TrialConfig.model_construct(trial_name="hello__a")]
+
+    scope = AsyncAgentEvalJob()._trial_progress_scope(HarborRuntimeConfig(), _job_context(tmp_path), MagicMock())
+    assert scope is not None
+    async with scope(harbor_job):
+        pass
+
+    # The writer keeps only the newest pending snapshot; the last, written before the scope exits, is the final count.
+    assert reported[-1] == {
+        TRIAL_COUNTS_STATUS_KEY: {"total": 1, "phases": {"cancelled": 1}, "rewarded": 0, "reward": None, "errors": {}}
+    }
+
+
 def _fabric_evidence_path(runtime: FabricAgentRuntime, task: AgentEvalTask, config: AgentEvalRunConfig) -> Path:
     return runtime._evidence_dir(0, task, config) / "fabric_result.json"
 
@@ -1023,8 +1056,10 @@ def test_resolve_target_builds_gym_runtime_from_runner_target(tmp_path: Path) ->
         hydra_params={"model": {"temperature": 0.7}},
         env_secrets={"OPENAI_API_KEY": SecretRef("dev/openai-key")},
     )
-    target, prompt_template, params = AgentEvalJob._resolve_target(gym_target, ctx)
+    progress = GymTrialCounter(AsyncMock(), reward_key="score")
+    target, prompt_template, params = AgentEvalJob._resolve_target(gym_target, ctx, gym_progress=progress)
     assert isinstance(target, GymAgentTaskRunner)
+    assert target._progress is progress
     assert target._config.agent == "simple_agent"
     assert target._config.resources_server == "mcqa"
     assert target._config.num_repeats == 2
@@ -1077,10 +1112,12 @@ def test_resolve_target_passes_job_storage_to_sandboxed_gym(
         environment=FilesetRef(root="dev/custom-environment"),
     )
     monkeypatch.setenv(GYM_SANDBOX_PLAN_ENVVAR, _sandbox_plan().model_dump_json())
+    progress = GymTrialCounter(AsyncMock(), reward_key="reward")
 
-    target, prompt_template, params = AgentEvalJob._resolve_target(gym_target, ctx)
+    target, prompt_template, params = AgentEvalJob._resolve_target(gym_target, ctx, gym_progress=progress)
 
     assert isinstance(target, SessionBackedGymRunner)
+    assert target._progress is progress
     assert target._persistent_storage_path == ctx.storage.persistent
     assert target._workspace == ctx.workspace
     assert prompt_template is None
@@ -1357,12 +1394,13 @@ def test_build_evaluator_without_identity_headers_forwards_no_headers() -> None:
     assert AgentEvalJob._build_evaluator(sdk, target).default_headers is None
 
 
-def _capture_evaluator_headers(mocker: MockerFixture) -> dict[str, dict[str, str] | None]:
-    """Swap in a fake ``AgentEvaluator`` that records the headers ``_build_evaluator`` computed."""
-    captured: dict[str, dict[str, str] | None] = {}
+def _capture_evaluator_headers(mocker: MockerFixture) -> dict[str, Any]:
+    """Swap in a fake ``AgentEvaluator`` that records the headers and progress ``_build_evaluator`` passed."""
+    captured: dict[str, Any] = {}
 
-    def _factory(*, default_headers: dict[str, str] | None = None) -> _FakeEvaluator:
+    def _factory(*, default_headers: dict[str, str] | None = None, progress: object = None) -> _FakeEvaluator:
         captured["default_headers"] = default_headers
+        captured["progress"] = progress
         return _FakeEvaluator()
 
     mocker.patch("nemo_evals.jobs.agent_evaluate.AgentEvaluator", _factory)
@@ -1435,6 +1473,18 @@ def test_run_sends_no_identity_to_a_third_party_target_via_typed_async_client(
 
     assert result["status"] == "completed"
     assert captured["default_headers"] is None
+    assert isinstance(captured["progress"], TrialCounter)
+
+
+def test_a_fabric_job_counts_its_trials_as_each_task_finishes(tmp_path: Path) -> None:
+    progress = TrialCounter(AsyncMock())
+
+    runtime, _, _ = AgentEvalJob._resolve_target(
+        _runner_target("openai/gpt-5.4"), _job_context(tmp_path), fabric_progress=progress
+    )
+
+    assert isinstance(runtime, FabricAgentRuntime)
+    assert runtime._progress is progress
 
 
 def test_input_spec_accepts_stored_metric_reference() -> None:

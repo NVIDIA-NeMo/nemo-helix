@@ -10,7 +10,6 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 
 vi.mock('@nemo/sdk/generated/platform/files', () => ({
   filesListFilesets: vi.fn(),
-  getFilesListFilesetsQueryKey: vi.fn((workspace: string) => ['filesets', workspace]),
 }));
 
 const fileset = (name: string) => ({ id: `default/${name}`, name, workspace: 'default' });
@@ -118,6 +117,72 @@ describe('useFilesetSearch', () => {
         }),
         expect.anything()
       )
+    );
+  });
+
+  it('sends several purposes as one $in filter', async () => {
+    vi.mocked(filesListFilesets).mockResolvedValue(page(['a'], 1, 1));
+
+    const { result } = renderHook(
+      () => useFilesetSearch({ workspace: 'ws', purpose: ['generic', 'environment'] }),
+      { wrapper }
+    );
+
+    await waitFor(() => expect(result.current.filesets).toHaveLength(1));
+    expect(filesListFilesets).toHaveBeenCalledWith(
+      'ws',
+      expect.objectContaining({
+        filter: withOperators({ purpose: { $in: ['environment', 'generic'] } }),
+      }),
+      expect.anything()
+    );
+  });
+
+  it('sends a one-item purpose list as a plain purpose filter', async () => {
+    vi.mocked(filesListFilesets).mockResolvedValue(page(['a'], 1, 1));
+
+    const { result } = renderHook(
+      () => useFilesetSearch({ workspace: 'ws', purpose: ['dataset'] }),
+      {
+        wrapper,
+      }
+    );
+
+    await waitFor(() => expect(result.current.filesets).toHaveLength(1));
+    expect(filesListFilesets).toHaveBeenCalledWith(
+      'ws',
+      expect.objectContaining({ filter: withOperators({ purpose: 'dataset' }) }),
+      expect.anything()
+    );
+  });
+
+  it('does not refetch when the purpose list is a new array with the same values', async () => {
+    vi.mocked(filesListFilesets).mockResolvedValue(page(['a'], 1, 1));
+
+    const { result, rerender } = renderHook(
+      ({ purpose }: { purpose: ('environment' | 'generic')[] }) =>
+        useFilesetSearch({ workspace: 'ws', purpose }),
+      { wrapper, initialProps: { purpose: ['environment', 'generic'] } }
+    );
+    await waitFor(() => expect(result.current.filesets).toHaveLength(1));
+
+    rerender({ purpose: ['generic', 'environment'] });
+
+    expect(filesListFilesets).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps an explicit empty description as an exact filter', async () => {
+    vi.mocked(filesListFilesets).mockResolvedValue(page(['a'], 1, 1));
+
+    const { result } = renderHook(() => useFilesetSearch({ workspace: 'ws', description: '' }), {
+      wrapper,
+    });
+
+    await waitFor(() => expect(result.current.filesets).toHaveLength(1));
+    expect(filesListFilesets).toHaveBeenCalledWith(
+      'ws',
+      expect.objectContaining({ filter: withOperators({ description: { $eq: '' } }) }),
+      expect.anything()
     );
   });
 

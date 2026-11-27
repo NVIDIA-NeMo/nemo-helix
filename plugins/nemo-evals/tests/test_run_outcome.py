@@ -4,11 +4,15 @@
 
 from __future__ import annotations
 
+import asyncio
+import threading
 from pathlib import Path
-from unittest.mock import AsyncMock
+from typing import Any
+from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
+from nemo_evals.jobs import run_outcome
 from nemo_evals.jobs.run_outcome import (
     STATUS_DETAILS_KEY,
     RunOutcome,
@@ -263,3 +267,79 @@ class TestReportRunOutcome:
             ctx=_ctx(tmp_path, "job-1", "attempt-1"),
             async_client=_async_client(),
         )
+
+
+async def test_status_writes_land_in_order_and_a_superseded_pending_snapshot_is_dropped(monkeypatch):
+    """A slow write still lands, an older snapshot never overwrites a newer one, and only the newest one waits.
+
+    Without dropping, a backlog of writes the reporter gave up on would hold the job's process open at exit.
+    """
+    first_started = threading.Event()
+    first_may_finish = threading.Event()
+    landed: list[int] = []
+
+    def write(details: dict[str, Any], **kwargs: Any) -> None:
+        if details["n"] == 1:
+            first_started.set()
+            first_may_finish.wait(timeout=5)
+        landed.append(details["n"])
+
+    monkeypatch.setattr(run_outcome, "report_status_details", write)
+    publish = run_outcome.status_details_writer(MagicMock(), None)
+
+    for n in (1, 2, 3):
+        with pytest.raises(TimeoutError):
+            async with asyncio.timeout(0.05):  # the reporter gives up waiting, as it does after 15s
+                await publish({"n": n})
+        if n == 1:
+            assert await asyncio.to_thread(first_started.wait, 5)
+
+    first_may_finish.set()
+    async with asyncio.timeout(5):
+        while len(landed) < 2:
+            await asyncio.sleep(0.01)
+    await asyncio.sleep(0.05)
+
+    assert landed == [1, 3]
+
+
+async def test_status_writes_run_on_a_daemon_thread_so_they_never_hold_the_process_at_exit(monkeypatch):
+    threads: list[threading.Thread] = []
+    monkeypatch.setattr(
+        run_outcome, "report_status_details", lambda details, **kwargs: threads.append(threading.current_thread())
+    )
+
+    await run_outcome.status_details_writer(MagicMock(), None)({"n": 1})
+
+    assert [thread.daemon for thread in threads] == [True]
+
+
+async def test_a_status_write_returns_once_its_snapshot_lands_while_newer_ones_keep_arriving(monkeypatch):
+    """Each caller waits for its own snapshot's write, not for the queue to empty."""
+    started: dict[int, threading.Event] = {n: threading.Event() for n in range(1, 4)}
+    may_finish: dict[int, threading.Event] = {n: threading.Event() for n in range(1, 4)}
+
+    def write(details: dict[str, Any], **kwargs: Any) -> None:
+        started[details["n"]].set()
+        may_finish[details["n"]].wait(timeout=5)
+
+    monkeypatch.setattr(run_outcome, "report_status_details", write)
+    publish = run_outcome.status_details_writer(MagicMock(), None)
+
+    first = asyncio.ensure_future(publish({"n": 1}))
+    assert await asyncio.to_thread(started[1].wait, 5)
+    second = asyncio.ensure_future(publish({"n": 2}))
+    await asyncio.sleep(0)
+    may_finish[1].set()
+    async with asyncio.timeout(5):
+        await first
+    assert await asyncio.to_thread(started[2].wait, 5)
+    third = asyncio.ensure_future(publish({"n": 3}))  # the queue is never empty from here until 3 lands
+    may_finish[2].set()
+    async with asyncio.timeout(5):
+        await second
+    assert not third.done()
+
+    may_finish[3].set()
+    async with asyncio.timeout(5):
+        await third

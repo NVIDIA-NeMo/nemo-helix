@@ -59,6 +59,7 @@ def _execute(
         return exit_code
 
     bootstrap = SimpleNamespace(
+        rank=0,
         progress=None,
         node_env={},
         driver_output=deque(["Traceback (most recent call last):", "RuntimeError: driver failed"]),

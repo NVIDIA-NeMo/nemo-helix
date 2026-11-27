@@ -228,6 +228,37 @@ the bundle root: `/evidence/` excludes only the root evidence directory. The sep
 `metadata.json`, `trials.jsonl`, or `scores.jsonl` before scheduling, because aggregation
 requires these files in every task bundle.
 
+### Watch a running job
+
+While an `agent-evaluate` job runs, its status details count its trials under `trial_counts`,
+updated as each trial moves. Every target reports: Harbor, Gym and Fabric runners, and model and
+agent endpoints. A Gym job plans one trial per rollout, tasks times `num_repeats`; a rollout Gym
+retries counts once per attempt, as in the final `evaluation`:
+
+```bash
+nemo jobs get-status <job-name> -f json
+```
+
+```json
+{
+  "status_details": {
+    "trial_counts": {
+      "total": 10,
+      "phases": {"succeeded": 6, "errored": 1, "pending": 3},
+      "rewarded": 6,
+      "reward": 0.5,
+      "errors": {"agent_error": 1}
+    }
+  }
+}
+```
+
+A trial has finished once it is `succeeded`, `errored` or `cancelled`; a trial still unfinished when
+the job stops counts as `cancelled`. Harbor reports each trial's phase as it moves; the other targets
+report a trial when it finishes, and sandboxed Gym runs in chunks of `sandbox.rollout_chunk_size`
+rollouts, as each chunk returns. `rewarded` and `reward` cover Harbor and Gym, whose runners score
+each trial as it finishes; other targets are scored after their trials, in `evaluation`.
+
 ### Download job results
 
 Wait for the platform job to reach a terminal state before reading either result:

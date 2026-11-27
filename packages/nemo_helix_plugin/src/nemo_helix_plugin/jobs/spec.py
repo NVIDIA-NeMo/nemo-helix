@@ -106,11 +106,14 @@ class TcpPortRange(JobSpecModel):
 
 
 class StepIngressRule(JobSpecModel):
-    """Ingress into the step's pods from peer pods that carry this job's ID under ``job_id_label``."""
+    """Ingress into the step's pods from peer pods that carry this job's unique ID under ``job_id_label``."""
 
     job_id_label: str = Field(
         pattern=_K8S_LABEL_KEY_PATTERN,
-        description="Label key on peer pods whose value must equal the job ID, e.g. 'nemo-rl-job-id'.",
+        description=(
+            "Label key on peer pods whose value must equal the job's unique ID (its entity UUID, NEMO_JOB_UID), "
+            "not its name, e.g. 'nemo-rl-job-id'."
+        ),
     )
     tcp_ports: list[Annotated[int, Field(ge=1, le=65535)]] = Field(
         min_length=1, description="TCP ports on the step's pods that matching peers may reach."

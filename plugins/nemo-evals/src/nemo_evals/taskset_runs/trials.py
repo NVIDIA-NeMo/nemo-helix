@@ -20,6 +20,8 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 TRIALS_STATUS_KEY = "trials"
 """Status-details key under which a task Job reports its trials, as a list of :class:`TrialProgress`."""
+TRIAL_COUNTS_STATUS_KEY = "trial_counts"
+"""Status-details key under which an agent-evaluate job reports its trials as they run, as :class:`TrialCounts`."""
 
 
 class TrialPhase(StrEnum):

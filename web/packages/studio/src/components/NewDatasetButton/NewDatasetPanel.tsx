@@ -1,11 +1,11 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import type { StorageBackend } from '@nemo/common/src/utils/storageBackend';
 import { CreateDatasetPanel } from '@studio/components/CreateDatasetPanel';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { FilesetDetailTab } from '@studio/routes/FilesetDetailRoute/constants';
 import { getDatasetDetailRoute } from '@studio/routes/utils';
-import type { StorageBackend } from '@studio/util/storageBackend';
 import type { FC } from 'react';
 import { useNavigate } from 'react-router';
 

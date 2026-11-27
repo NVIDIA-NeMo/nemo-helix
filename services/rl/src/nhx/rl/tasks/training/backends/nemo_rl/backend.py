@@ -182,6 +182,12 @@ class NemoRLBackend(TrainingBackend):
 
         bootstrap = create_bootstrap_from_env()
         bootstrap.progress = progress
+        if bootstrap.rank == 0:
+            # Sandboxes an earlier run of this job left behind, when its pod was killed before its own
+            # sweep ran: a rerun or a resume reuses the job's storage, and they would keep writing to it.
+            # Only rank 0 runs the driver that creates sandboxes, after every worker has joined, so
+            # nothing from this run exists yet.
+            self._reap_job_sandboxes(customizer_config)
         if customizer_config.parallelism.num_nodes > 1:
             # Each pod has its own RDMA devices, so each node's ray start gets this pod's list.
             bootstrap.node_env = get_nccl_ib_env()
@@ -256,6 +262,11 @@ class NemoRLBackend(TrainingBackend):
         gym = getattr(config, "gym", None)
         if gym is None or not getattr(gym, "sandboxed", False):
             return
+        # The sandboxes carry the job's unique id, not its name (see the sandboxed GRPO config).
+        job_uid = self._job_ctx.job_uid
+        if not job_uid:
+            logger.error(f"No unique id for job {self._job_ctx.job_id}; not sweeping its sandboxes")
+            return
         timeout_s = SANDBOX_REAP_TIMEOUT_S
         if deadline is not None:
             remaining = deadline - time.monotonic()
@@ -267,7 +278,7 @@ class NemoRLBackend(TrainingBackend):
             from sandboxed_gym.job_reaper import reap_job_sandboxes
 
             reap_job_sandboxes(
-                self._job_ctx.job_id,
+                job_uid,
                 host_provider="opensandbox",
                 host_provider_options=sandbox_host_provider_options(gym),
                 timeout_s=timeout_s,

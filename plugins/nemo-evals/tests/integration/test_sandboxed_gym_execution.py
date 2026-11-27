@@ -244,7 +244,9 @@ async def test_a_sandboxed_run_provisions_a_host_and_returns_attributed_trials(
 ) -> None:
     """The whole path: target -> serve config -> broker + host -> rollouts -> attributed trials."""
     tasks = _tasks(tmp_path)
-    runner = SessionBackedGymRunner(target=_target(), plan=_plan(), job_id="eval-job-1")
+    runner = SessionBackedGymRunner(
+        target=_target(), plan=_plan(), job_id="eval-job-1", job_uid="00000000-0000-4000-8000-000000000001"
+    )
 
     trials = await runner.run_tasks(tasks, AgentEvalRunConfig(work_dir=tmp_path))
 
@@ -259,7 +261,10 @@ async def test_repeats_reach_the_host_in_chunks_sized_by_concurrency(
     """The run is split across POSTs, so no one request carries, or waits on, all of it."""
     tasks = _tasks(tmp_path)
     runner = SessionBackedGymRunner(
-        target=_target(num_repeats=5, concurrency=16), plan=_plan(), job_id="eval-job-repeats"
+        target=_target(num_repeats=5, concurrency=16),
+        plan=_plan(),
+        job_id="eval-job-repeats",
+        job_uid="00000000-0000-4000-8000-000000000001",
     )
 
     trials = await runner.run_tasks(tasks, AgentEvalRunConfig(work_dir=tmp_path))
@@ -280,7 +285,10 @@ async def test_an_explicit_concurrency_bounds_the_rollouts_in_flight(
 ) -> None:
     _StubGymHostHandler.delay_s = 0.1
     runner = SessionBackedGymRunner(
-        target=_target(num_repeats=3, concurrency=2), plan=_plan(), job_id="eval-job-concurrency"
+        target=_target(num_repeats=3, concurrency=2),
+        plan=_plan(),
+        job_id="eval-job-concurrency",
+        job_uid="00000000-0000-4000-8000-000000000001",
     )
 
     trials = await runner.run_tasks(_tasks(tmp_path), AgentEvalRunConfig(work_dir=tmp_path))
@@ -305,7 +313,9 @@ async def test_a_host_bootstrap_failure_fails_the_run_with_the_hosts_output(
             }
         },
     )
-    runner = SessionBackedGymRunner(target=_target(), plan=_plan(), job_id="eval-job-bootstrap")
+    runner = SessionBackedGymRunner(
+        target=_target(), plan=_plan(), job_id="eval-job-bootstrap", job_uid="00000000-0000-4000-8000-000000000001"
+    )
 
     with pytest.raises(RuntimeError) as excinfo:
         await runner.run_tasks(_tasks(tmp_path), AgentEvalRunConfig(work_dir=tmp_path))
@@ -324,7 +334,9 @@ async def test_a_rollout_error_reported_on_a_200_fails_the_run_with_the_hosts_ou
         200,
         {"error": {"code": "internal", "message": "KeyError: 'agent_ref'", "host_output_tail": ["Traceback ..."]}},
     )
-    runner = SessionBackedGymRunner(target=_target(), plan=_plan(), job_id="eval-job-rollout-error")
+    runner = SessionBackedGymRunner(
+        target=_target(), plan=_plan(), job_id="eval-job-rollout-error", job_uid="00000000-0000-4000-8000-000000000001"
+    )
 
     with pytest.raises(RuntimeError) as excinfo:
         await runner.run_tasks(_tasks(tmp_path), AgentEvalRunConfig(work_dir=tmp_path))
@@ -339,13 +351,16 @@ async def test_the_host_is_created_from_the_deployment_config_and_the_targets_se
 ) -> None:
     # Proves the two halves of the serve config actually reach the provider, rather than the run
     # succeeding on defaults.
-    runner = SessionBackedGymRunner(target=_target(), plan=_plan(), job_id="eval-job-2")
+    runner = SessionBackedGymRunner(
+        target=_target(), plan=_plan(), job_id="eval-job-2", job_uid="00000000-0000-4000-8000-000000000001"
+    )
 
     await runner.run_tasks(_tasks(tmp_path), AgentEvalRunConfig(work_dir=tmp_path))
 
     (spec,) = stub_provider.created
     assert spec.runtime_image == RUNTIME_IMAGE
-    assert spec.job_id == "eval-job-2"
+    # Labelled by the job's unique id, which a job of the same name in another workspace doesn't share.
+    assert spec.job_id == "00000000-0000-4000-8000-000000000001"
 
     # The broker is real, listening, and reachable from the host: its URL and per-run token are in
     # the host's bootstrap environment. Without this the run could pass with no broker at all, which
@@ -383,6 +398,7 @@ async def test_a_wheels_v1_run_under_strict_egress_records_that_the_host_ran_off
         target=_target(environment=FilesetRef(root="default/greeting")),
         plan=_plan(sandbox_egress_allow=()),
         job_id="eval-job-offline",
+        job_uid="00000000-0000-4000-8000-000000000001",
         persistent_storage_path=persistent,
     )
 
@@ -394,7 +410,9 @@ async def test_a_wheels_v1_run_under_strict_egress_records_that_the_host_ran_off
 
 
 async def test_the_host_is_destroyed_when_the_run_finishes(stub_provider: _StubHostProvider, tmp_path: Path) -> None:
-    runner = SessionBackedGymRunner(target=_target(), plan=_plan(), job_id="eval-job-3")
+    runner = SessionBackedGymRunner(
+        target=_target(), plan=_plan(), job_id="eval-job-3", job_uid="00000000-0000-4000-8000-000000000001"
+    )
 
     await runner.run_tasks(_tasks(tmp_path), AgentEvalRunConfig(work_dir=tmp_path))
 
@@ -405,7 +423,9 @@ async def test_the_host_is_destroyed_when_the_run_fails(
     stub_provider: _StubHostProvider, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The case teardown-in-`finally` exists for; a failed run must not strand the host."""
-    runner = SessionBackedGymRunner(target=_target(), plan=_plan(), job_id="eval-job-4")
+    runner = SessionBackedGymRunner(
+        target=_target(), plan=_plan(), job_id="eval-job-4", job_uid="00000000-0000-4000-8000-000000000001"
+    )
     monkeypatch.setattr(
         "nhx_evals_sdk.agent_eval.runtimes.gym.sandboxed.SandboxedGymAgentTaskRunner.run_tasks",
         _raise_boom,
@@ -439,7 +459,10 @@ async def test_cancelling_a_run_stops_it_sending_the_rollouts_still_queued(
     release = _StubGymHostHandler.gate = threading.Event()
     # Six single-example chunks, one in flight at a time: five are still queued at cancellation.
     runner = SessionBackedGymRunner(
-        target=_target(num_repeats=3, concurrency=1), plan=_plan(), job_id="eval-job-cancelled"
+        target=_target(num_repeats=3, concurrency=1),
+        plan=_plan(),
+        job_id="eval-job-cancelled",
+        job_uid="00000000-0000-4000-8000-000000000001",
     )
     run = asyncio.create_task(runner.run_tasks(_tasks(tmp_path), AgentEvalRunConfig(work_dir=tmp_path)))
     try:
@@ -466,7 +489,10 @@ async def test_the_collection_timeout_bounds_the_whole_run_not_each_chunk(
     _StubGymHostHandler.delay_s = 0.4
     # Six single-example chunks, one in flight at a time: 2.4s of work against a 1s budget.
     runner = SessionBackedGymRunner(
-        target=_target(num_repeats=3, concurrency=1, collection_timeout_s=1.0), plan=_plan(), job_id="eval-job-budget"
+        target=_target(num_repeats=3, concurrency=1, collection_timeout_s=1.0),
+        plan=_plan(),
+        job_id="eval-job-budget",
+        job_uid="00000000-0000-4000-8000-000000000001",
     )
 
     with pytest.raises(CollectionTimeoutError, match=r"collection_timeout_s=1s"):
@@ -482,7 +508,12 @@ async def test_heartbeats_do_not_extend_the_collection_deadline(
     """The host keeps a long chunk's connection alive with whitespace; that must not reset the budget."""
     release = _StubGymHostHandler.gate = threading.Event()
     _StubGymHostHandler.heartbeat_s = 0.05
-    runner = SessionBackedGymRunner(target=_target(collection_timeout_s=1.0), plan=_plan(), job_id="eval-job-heartbeat")
+    runner = SessionBackedGymRunner(
+        target=_target(collection_timeout_s=1.0),
+        plan=_plan(),
+        job_id="eval-job-heartbeat",
+        job_uid="00000000-0000-4000-8000-000000000001",
+    )
     try:
         started = time.monotonic()
         with pytest.raises(CollectionTimeoutError):
@@ -499,7 +530,10 @@ async def test_a_run_inside_its_timeouts_completes_and_records_them(
     stub_provider: _StubHostProvider, tmp_path: Path
 ) -> None:
     runner = SessionBackedGymRunner(
-        target=_target(startup_timeout_s=45, collection_timeout_s=30), plan=_plan(), job_id="eval-job-in-budget"
+        target=_target(startup_timeout_s=45, collection_timeout_s=30),
+        plan=_plan(),
+        job_id="eval-job-in-budget",
+        job_uid="00000000-0000-4000-8000-000000000001",
     )
 
     trials = await runner.run_tasks(_tasks(tmp_path), AgentEvalRunConfig(work_dir=tmp_path))
@@ -545,7 +579,9 @@ async def test_a_real_opensandbox_host_serves_rollouts(tmp_path: Path) -> None:
     )
     plan = resolve_sandbox_plan(config, _target())
     assert plan is not None
-    runner = SessionBackedGymRunner(target=_target(), plan=plan, job_id="eval-live-1")
+    runner = SessionBackedGymRunner(
+        target=_target(), plan=plan, job_id="eval-live-1", job_uid="00000000-0000-4000-8000-000000000001"
+    )
 
     trials = await runner.run_tasks(_tasks(tmp_path), AgentEvalRunConfig(work_dir=tmp_path))
 

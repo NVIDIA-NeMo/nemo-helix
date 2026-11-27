@@ -37,12 +37,15 @@ from nemo_evals.jobs.gym_environment_package import (
 )
 from nemo_evals.jobs.secret_env import GYM_SANDBOX_PLAN_ENVVAR, JobEnvSecretSource
 from nemo_evals.sandbox_quantity import host_disk_request_gib, quantity_bytes
+from nemo_helix_plugin.jobs.constants import NEMO_JOB_UID_ENVVAR
 from nemo_helix_plugin.jobs.execution_profiles import (
     KubernetesJobExecutionProfile,
     VolcanoJobExecutionProfile,
 )
 from nemo_helix_plugin.jobs.image import get_qualified_image
 from nemo_helix_plugin.jobs.spec import BaseExecutionProfile
+from nhx_evals_sdk.agent_eval.progress import tell
+from nhx_evals_sdk.agent_eval.runtimes.gym.progress import RolloutProgress
 from nhx_evals_sdk.agent_eval.runtimes.secrets import env_secret_values
 from nhx_sandbox.harbor_opensandbox_services import SandboxAgentBundle
 from pydantic import BaseModel, ConfigDict, Field
@@ -466,6 +469,7 @@ def serve_config(
     plan: SandboxPlan,
     *,
     job_id: str,
+    sandbox_id: str,
     workspace: str = "default",
     persistent_storage_path: Path | None = None,
 ) -> dict[str, Any]:
@@ -474,6 +478,10 @@ def serve_config(
     Job-derived and deployment-derived settings meet here and nowhere else: the target supplies the
     environment selection and its own environment variables, the resolved plan supplies the cluster
     facts, and the broker token and rollout URL are minted by the session itself.
+
+    ``job_id`` is the job's name, which names its storage. ``sandbox_id`` is what its sandboxes are
+    labelled, owned and swept by, so it must be unique across workspaces: the job's entity UUID on the
+    platform. A name would let a job in one workspace sweep another workspace's job of the same name.
     """
     environment_pvc_claim = plan.job_storage_pvc_claim
     host_provider_options = dict(plan.host_provider_options)
@@ -530,7 +538,7 @@ def serve_config(
     env[ROUTE_FAILURES_TO_SIDECAR_ENV_KEY] = "1"
 
     return {
-        "job_id": job_id,
+        "job_id": sandbox_id,
         "host_provider": plan.host_provider,
         "environment_path": "/job/environment" if fileset_environment else None,
         "environment_offline": offline,
@@ -555,7 +563,7 @@ def serve_config(
             "container_storage_discard": plan.container_storage_discard,
         },
         "episode_broker": {
-            "job_id": job_id,
+            "job_id": sandbox_id,
             "backend": plan.episode_backend,
             "allow_insecure_memory_backend": plan.allow_insecure_memory_backend,
             "approved_images": plan.approved_images,
@@ -587,19 +595,37 @@ class SessionBackedGymRunner:
         target: GymRunnerTarget,
         plan: SandboxPlan,
         job_id: str | None,
+        job_uid: str | None = None,
         workspace: str = "default",
         persistent_storage_path: Path | None = None,
+        progress: RolloutProgress | None = None,
     ) -> None:
         """Keep the resolved plan and the job's storage identity for ``run_tasks``.
 
         ``workspace`` and ``persistent_storage_path`` exist so a FileSet-backed host mounts the
         tree the stage step wrote, rather than a shared deployment-wide environment cache.
+
+        A platform job's sandboxes are labelled with ``job_uid``, its entity UUID, not ``job_id``, its
+        name: names are unique only within a workspace, and the job's sandbox sweeps match the label.
+
+        ``progress`` receives each chunk of rollouts as the host returns it.
         """
+        if job_id and not job_uid:
+            raise SandboxUnavailableError(
+                f"{NEMO_JOB_UID_ENVVAR} is not set for job {job_id!r}. Sandboxed Gym labels a job's sandboxes "
+                "with the job's unique id; the job name is not unique across workspaces. Upgrade the jobs "
+                "controller, which sets it."
+            )
         self._target = target
         self._plan = plan
         self._job_id = job_id or self.LOCAL_JOB_ID
+        self._sandbox_id = job_uid if job_id and job_uid else self.LOCAL_JOB_ID
+        # A platform job sweeps by its unique id, which no other job shares. LOCAL_JOB_ID is shared by every
+        # local run, so a local run doesn't sweep: it could destroy the host of another local run in progress.
+        self._should_sweep_before_start = self._sandbox_id != self.LOCAL_JOB_ID
         self._workspace = workspace
         self._persistent_storage_path = persistent_storage_path
+        self._progress = progress
         self._delegate: Any | None = None
         self._rollout_settings: dict[str, Any] = {}
 
@@ -643,16 +669,19 @@ class SessionBackedGymRunner:
         return gym_scoring_metrics(task, trials)
 
     async def run_tasks(self, tasks: Any, config: Any = None) -> Any:
+        import sandboxed_gym.orchestrator as gym_orchestrator
         from nhx_evals_sdk.agent_eval.runtimes.gym.sandboxed import (
             SandboxedGymAgentTaskRunner,
             SandboxedGymRuntimeConfig,
         )
         from sandboxed_gym import SandboxedGymOrchestrator, SandboxedGymServeConfig
+        from sandboxed_gym.job_reaper import reap_job_sandboxes
 
         payload = serve_config(
             self._target,
             self._plan,
             job_id=self._job_id,
+            sandbox_id=self._sandbox_id,
             workspace=self._workspace,
             persistent_storage_path=self._persistent_storage_path,
         )
@@ -665,6 +694,27 @@ class SessionBackedGymRunner:
             "collection_timeout_s": self._target.collection_timeout_s,
             "environment_offline": serve.environment_offline,
         }
+        # Sandboxes an earlier attempt of this job left behind, when its pod was killed before its own
+        # sweep ran: a rerun reuses the job's storage, and they would keep writing to it. This run starts
+        # the job's only Gym session, so nothing of its own exists yet. Never raises: a sweep that fails
+        # leaves things as they were. A platform job only; see ``__init__``.
+        if self._should_sweep_before_start:
+            await asyncio.to_thread(
+                reap_job_sandboxes,
+                serve.job_id,
+                host_provider=serve.host_provider,
+                host_provider_options=serve.sandbox.host_provider_options,
+            )
+        # Armed here, on the event loop's thread, because only the main thread can install a signal
+        # handler: `start` arms the same reaper, but in a worker thread it gets only `atexit`. A cancel
+        # (SIGTERM) then can't unwind past `start` blocked on the host's readiness, or past a blocked
+        # rollout, before the kubelet's SIGKILL, so `atexit` never runs and the host outlives the job.
+        # With the handler, SIGTERM destroys every sandbox labelled with this job, then exits by the signal.
+        gym_orchestrator.install_job_sandbox_reaper(
+            serve.job_id,
+            host_provider=serve.host_provider,
+            host_provider_options=serve.sandbox.host_provider_options,
+        )
         orchestrator = SandboxedGymOrchestrator()
         # `start` provisions a host and blocks on its readiness probe, so it runs off the event loop.
         session = await asyncio.to_thread(orchestrator.start, serve)
@@ -680,7 +730,11 @@ class SessionBackedGymRunner:
                     reward_key=self._target.reward_key,
                 ),
                 collect=functools.partial(
-                    collect_within, session.arun_rollouts, timeout_s=self._target.collection_timeout_s
+                    collect_reporting,
+                    functools.partial(
+                        collect_within, session.arun_rollouts, timeout_s=self._target.collection_timeout_s
+                    ),
+                    progress=self._progress,
                 ),
             )
             return await self._delegate.run_tasks(tasks, config)
@@ -688,16 +742,35 @@ class SessionBackedGymRunner:
             await asyncio.to_thread(session.shutdown)
 
 
+async def collect_reporting(
+    collect: Callable[..., Awaitable[list[Any]]],
+    examples: list[dict[str, Any]],
+    *,
+    progress: RolloutProgress | None,
+) -> list[Any]:
+    """Run ``collect``, telling ``progress`` how many rollouts it plans and each chunk of results as it returns."""
+    if progress is None:
+        return await collect(examples)
+    await tell(progress.planned(len(examples)))
+    try:
+        return await collect(examples, on_results=progress.finished)
+    finally:
+        await tell(progress.stopped())
+
+
 async def collect_within(
-    collect: Callable[[list[dict[str, Any]]], Awaitable[list[Any]]],
+    collect: Callable[..., Awaitable[list[Any]]],
     examples: list[dict[str, Any]],
     *,
     timeout_s: float | None,
+    on_results: Callable[[list[Any]], Awaitable[None]] | None = None,
 ) -> list[Any]:
     """Run ``collect`` under one absolute deadline, or none when ``timeout_s`` is ``None``."""
     try:
         async with asyncio.timeout(timeout_s) as deadline:
-            return await collect(examples)
+            if on_results is None:
+                return await collect(examples)
+            return await collect(examples, on_results=on_results)
     except TimeoutError as exc:
         if not deadline.expired():
             raise

@@ -9,12 +9,16 @@ import {
 } from '@nemo/common/src/components/DataView/StudioDataView';
 import { QuickActionsMenuRoot } from '@nemo/common/src/components/QuickActionsMenu/QuickActionsMenuRoot';
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
-import { Cloud, Db } from '@nemo/icons/icons';
+import { PURPOSE_LABELS } from '@nemo/common/src/utils/filesetPurpose';
+import {
+  formatStorageBackendLabel,
+  getStorageBackendIcon,
+} from '@nemo/common/src/utils/storageBackend';
 import type { FilesetOutput as Dataset } from '@nemo/sdk/generated/platform/schema';
 import { FilesetPurpose } from '@nemo/sdk/generated/platform/schema/FilesetPurpose';
 import { StorageConfigType } from '@nemo/sdk/generated/platform/schema/StorageConfigType';
 import { Flex, Tag, Text } from '@nvidia/foundations-react-core';
-import { PURPOSE_LABELS, PURPOSE_TAG_COLORS } from '@studio/components/FilesetsTable/constants';
+import { PURPOSE_TAG_COLORS } from '@studio/components/FilesetsTable/constants';
 import { getStorageBackend, getStoragePath } from '@studio/components/FilesetsTable/helpers';
 import type {
   DatasetWithId,
@@ -22,7 +26,6 @@ import type {
   ModalOpenState,
 } from '@studio/components/FilesetsTable/types';
 import { EMPTY_FIELD_VALUE } from '@studio/constants/constants';
-import { formatStorageBackendLabel } from '@studio/util/storageBackend';
 import type { ComponentProps, Dispatch, SetStateAction } from 'react';
 
 interface MakeFilesetsTableColumnsArgs {
@@ -94,8 +97,7 @@ export function makeFilesetsTableColumns({
           const backend = getStorageBackend(row.original?.storage);
           if (!backend) return null;
           const label = formatStorageBackendLabel(backend);
-          const isLocal = backend === 'local';
-          const Icon = isLocal ? Db : Cloud;
+          const Icon = getStorageBackendIcon(backend);
           return (
             <Flex align="center" gap="density-sm" className="min-w-0">
               <Icon className="flex-none text-fg-subdued" size="16" strokeWidth={0} />

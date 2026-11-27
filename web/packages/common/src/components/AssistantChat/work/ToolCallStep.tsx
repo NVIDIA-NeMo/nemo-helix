@@ -109,7 +109,9 @@ export const ToolCallStep = ({
 }: ToolCallStepProps) => {
   const toolName = resolveToolName(rawToolName);
   const toolArgs = toAssistantToolArgs(args);
-  const fileChange = isError ? undefined : getFileChangeSummary(toolName, toolArgs, argsText ?? '');
+  const fileChange = isError
+    ? undefined
+    : getFileChangeSummary(rawToolName, toolArgs, argsText ?? '');
   const { action, detail } = getTitleParts(toolName, toolArgs, running, fileChange);
   const Icon = getStepIcon(toolName, fileChange);
   const command = toolName === 'Bash' ? getBashCommand(toolArgs) : undefined;
@@ -154,15 +156,25 @@ export const ToolCallStep = ({
       }
     >
       {fileChange ? (
-        <WorkCodeSnippet
-          label={fileChange.path}
-          language={
-            fileChange.action === 'Wrote'
-              ? (getLanguageFromFilePath(fileChange.path) ?? 'text')
-              : 'json'
-          }
-          value={fileChange.reviewContent}
-        />
+        <Stack gap="density-md">
+          <WorkCodeSnippet
+            label={fileChange.path}
+            language={
+              fileChange.action === 'Wrote'
+                ? (getLanguageFromFilePath(fileChange.path) ?? 'text')
+                : 'json'
+            }
+            value={fileChange.reviewContent}
+          />
+          {/* A shape-based match can be wrong, so keep its result reachable. */}
+          {fileChange.inferred && resultPayload ? (
+            <WorkCodeSnippet
+              label="Result"
+              language={resultPayload.language}
+              value={resultPayload.text}
+            />
+          ) : null}
+        </Stack>
       ) : (
         <Stack gap="density-md">
           {command ? (

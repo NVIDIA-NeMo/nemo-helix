@@ -13,14 +13,15 @@ import sys
 import tempfile
 import threading
 import types
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterator, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
 import pytest
 from nhx_evals_sdk.agent_eval.runtimes.fabric import _common
 from nhx_evals_sdk.agent_eval.runtimes.fabric import runtime as fabric_runtime
-from nhx_evals_sdk.agent_eval.tasks import AgentEvalTask
+from nhx_evals_sdk.agent_eval.tasks import AgentEvalRunConfig, AgentEvalTask
+from nhx_evals_sdk.agent_eval.trials import AgentEvalTrial
 from nhx_evals_sdk.values.evidence import EVIDENCE_FORMAT_ATIF, EVIDENCE_TRACE
 
 
@@ -1651,3 +1652,34 @@ def test_a_relative_keyring_base_home_is_passed_on_as_an_absolute_path(
 
     assert env["CODEX_HOME"] == str(tmp_path / ".codex")
     fabric_runtime._remove_codex_home(home)
+
+
+@pytest.mark.asyncio
+async def test_fabric_runtime_reports_each_trial_as_its_task_finishes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    events: list[object] = []
+
+    class Progress:
+        async def planned(self, trials: int, /) -> None:
+            events.append(("planned", trials))
+
+        async def finished(self, trials: Sequence[AgentEvalTrial], /) -> None:
+            events.extend(("finished", trial.task_id, trial.status.value) for trial in trials)
+
+        async def stopped(self) -> None:
+            events.append("stopped")
+
+    def handler(agent: Any, kwargs: dict[str, Any]) -> _FakeResult:
+        if kwargs["request"].request_id == "task/2":
+            return _FakeResult(status="failed", output={"adapter": "cli", "response": "", "returncode": 1})
+        return _FakeResult(status="succeeded", output={"adapter": "cli", "response": "PONG", "returncode": 0})
+
+    _install_fake_fabric(monkeypatch, handler)
+    runtime = fabric_runtime.FabricAgentRuntime(
+        config=_CONFIG, model="openai/gpt-5.4", work_root=tmp_path / "fabric", progress=Progress()
+    )
+
+    await runtime.run_tasks([_TASK, _TASK.model_copy(update={"id": "task/2"})], AgentEvalRunConfig(parallelism=1))
+
+    assert events == [("planned", 2), ("finished", "task/1", "completed"), ("finished", "task/2", "failed"), "stopped"]

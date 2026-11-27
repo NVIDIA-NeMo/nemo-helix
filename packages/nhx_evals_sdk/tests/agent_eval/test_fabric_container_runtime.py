@@ -10,6 +10,7 @@ in-container ``/out`` layout on ``download_dir``, so we can assert the evidence 
 
 from __future__ import annotations
 
+import asyncio
 import json
 import sys
 import types
@@ -730,3 +731,23 @@ async def test_sandbox_exception_is_isolated_per_task(tmp_path: Path) -> None:
     assert all(trial.status == AgentEvalTrialStatus.FAILED for trial in trials)
     assert {trial.task_id for trial in trials} == {"fix-bug", "other"}
     assert provider.closed == 2  # both sandboxes were torn down despite the mid-run failures
+
+
+async def test_the_sandbox_is_disposed_even_when_the_final_progress_report_is_cancelled(tmp_path: Path) -> None:
+    """Cleanup runs before the final progress report, so cancelling that report can't leak the sandbox."""
+
+    class CancelledProgress:
+        async def planned(self, trials: int, /) -> None:
+            pass
+
+        async def finished(self, trials: Sequence[AgentEvalTrial], /) -> None:
+            pass
+
+        async def stopped(self) -> None:
+            raise asyncio.CancelledError
+
+    provider = _FakeProvider()
+    with pytest.raises(asyncio.CancelledError):
+        await _run(_runtime(provider, progress=CancelledProgress()), [_task()], tmp_path)
+
+    assert provider.aclosed == 1
