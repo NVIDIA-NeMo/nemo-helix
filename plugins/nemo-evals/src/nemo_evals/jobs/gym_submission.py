@@ -158,6 +158,7 @@ def gym_runtime_target(target: GymRunnerTarget, ctx: JobContext) -> SessionBacke
             target=target,
             plan=plan,
             job_id=ctx.job_id,
+            job_uid=ctx.job_uid,
             workspace=ctx.workspace,
             persistent_storage_path=ctx.storage.persistent,
         )
