@@ -18,7 +18,7 @@ from nemo_evals.api.service.taskset_service import TasksetService
 from nemo_evals.config import get_config
 from nemo_evals.image_builds.service import ImageBuildService, JobsServiceBuildJobs, builder_authorizer
 from nemo_evals.taskset_runs.store import TasksetRunStore
-from nemo_helix_plugin.auth import current_auth_context
+from nemo_helix_plugin.auth import current_auth_context, current_request_principal
 from nemo_helix_plugin.client.adapter import AsyncHelixClient
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client_provider import get_async_nemo_client
@@ -57,7 +57,8 @@ async def get_taskset_run_service(
     """
     caller = normalize_run_caller(caller)
     principal = current_auth_context()
-    on_behalf_of = principal.to_principal() if principal is not None else caller
+    # Delegate the live principal, which keeps the caller's access key ID; the stored auth context doesn't.
+    on_behalf_of = current_request_principal() or caller
     async with get_async_nemo_client(as_service="evals", internal=True, on_behalf_of=on_behalf_of) as async_client:
         entities_client = AsyncEntitiesClient.from_client(async_client)
         files_client = AsyncFilesClient.from_client(async_client)
@@ -174,11 +175,9 @@ async def delegated_service_client(request_client: AsyncHelixClient) -> AsyncGen
     service still authorizes the delegated caller. Without a request principal there is nobody to
     delegate, so the request-scoped client is used rather than an undelegated service client.
     """
-    caller = current_auth_context()
+    caller = current_request_principal()
     if caller is None:
         yield request_client
         return
-    async with get_async_nemo_client(
-        as_service=_EVALS_SERVICE, internal=True, on_behalf_of=caller.to_principal()
-    ) as service_client:
+    async with get_async_nemo_client(as_service=_EVALS_SERVICE, internal=True, on_behalf_of=caller) as service_client:
         yield service_client

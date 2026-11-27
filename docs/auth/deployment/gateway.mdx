@@ -38,6 +38,8 @@ For IdP-issued tokens, enforce your IdP's revocation policy before setting NeMo 
 
 - `X-NHX-Principal-Id`, `X-NHX-Principal-Email`, `X-NHX-Principal-Groups`, `X-NHX-Principal-On-Behalf-Of`
 - `X-NHX-Principal-On-Behalf-Of-Email`, `X-NHX-Principal-On-Behalf-Of-Groups`
+- `X-NHX-Actor-Account-Id`, `X-NHX-Actor-Aliases`, `X-NHX-Subject-Account-Id`, `X-NHX-Subject-Aliases`
+- `X-NHX-Access-Key-Jti`, `X-NHX-Subject-Access-Key-Jti`
 - `X-NHX-Scopes`
 
 If external clients can set these headers, they can forge any identity or bypass authorization entirely. The gateway should also block external access to `/internal/*` paths (used for service-to-service communication).
@@ -54,6 +56,7 @@ When the gateway has authenticated the bearer token, it must forward:
 | `X-NHX-Principal-Email` | User email, when present in the authenticated token. |
 | `X-NHX-Principal-Groups` | Comma-separated group names, when present in the authenticated token. |
 | `X-NHX-Scopes` | Space-separated token scopes, when the authenticated token has `scope` or `scp` claims. |
+| `X-NHX-Access-Key-Jti` | ID of the Scoped Access Key, when the bearer token is one. Authorization uses it to apply the key's workspace limit. If the gateway doesn't forward it, every request from a service account that has ever had a workspace-limited key is denied, including requests made with the limited key. |
 
 Header names are case-insensitive; services normalize them.
 
@@ -108,6 +111,7 @@ http_filters:
               - exact: x-nhx-principal-id
               - exact: x-nhx-principal-email
               - exact: x-nhx-principal-groups
+              - exact: x-nhx-access-key-jti
               - exact: x-nhx-scopes
   - name: envoy.filters.http.router
     typed_config:
@@ -123,24 +127,31 @@ Configure your gateway to remove NeMo Helix auth headers from incoming external 
 
 <Accordion title="Envoy header stripping">
 
-Add `request_headers_to_remove` to your route configuration:
+Remove the headers in a filter that runs **before** `ext_authz`. Don't use `request_headers_to_remove` on the route: the router filter runs last, after `ext_authz` has added the authenticated headers, so it would strip them from the request the backend receives.
 
 ```yaml
-route_config:
-  virtual_hosts:
-    - name: nhx_service
-      domains: ["*"]
-      request_headers_to_remove:
-        - "x-nhx-principal-id"
-        - "x-nhx-principal-email"
-        - "x-nhx-principal-groups"
-        - "x-nhx-principal-on-behalf-of"
-        - "x-nhx-principal-on-behalf-of-email"
-        - "x-nhx-principal-on-behalf-of-groups"
-        - "x-nhx-scopes"
-      routes:
-        - match: { prefix: "/" }
-          route: { cluster: nhx_backend }
+http_filters:
+  - name: envoy.filters.http.lua
+    typed_config:
+      "@type": type.googleapis.com/envoy.extensions.filters.http.lua.v3.Lua
+      inline_code: |
+        function envoy_on_request(request_handle)
+            request_handle:headers():remove("x-nhx-principal-id")
+            request_handle:headers():remove("x-nhx-actor-account-id")
+            request_handle:headers():remove("x-nhx-principal-email")
+            request_handle:headers():remove("x-nhx-principal-groups")
+            request_handle:headers():remove("x-nhx-actor-aliases")
+            request_handle:headers():remove("x-nhx-principal-on-behalf-of")
+            request_handle:headers():remove("x-nhx-subject-account-id")
+            request_handle:headers():remove("x-nhx-subject-aliases")
+            request_handle:headers():remove("x-nhx-access-key-jti")
+            request_handle:headers():remove("x-nhx-subject-access-key-jti")
+            request_handle:headers():remove("x-nhx-principal-on-behalf-of-email")
+            request_handle:headers():remove("x-nhx-principal-on-behalf-of-groups")
+            request_handle:headers():remove("x-nhx-authorized")
+            request_handle:headers():remove("x-nhx-scopes")
+        end
+  # ext_authz and router filters follow
 ```
 
 </Accordion>

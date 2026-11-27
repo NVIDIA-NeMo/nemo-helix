@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from weakref import WeakKeyDictionary
 
 from nhx.core.entities.app.database import create_async_engine_for_entities
+from nhx.core.entities.app.repository.access_key_workspace import AccessKeyWorkspaceStore
 from nhx.core.entities.app.repository.account_credential import (
     AccountCredentialConflictError,
     AccountCredentialRecord,
@@ -151,6 +152,7 @@ def dep_entity_repository(
 
 __all__ = [
     "WorkspaceRepositoryInterface",
+    "AccessKeyWorkspaceStore",
     "AccountIdentityConflictError",
     "AccountIdentityRecord",
     "AccountIdentityStore",

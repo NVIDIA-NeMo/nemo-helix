@@ -232,3 +232,27 @@ async def test_workspace_access_does_not_query_bindings_for_unscoped_access(
 
     assert await require_workspace_access(repository, "new-workspace") is None
     repository.list_entities.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("bindings", "expected"),
+    [
+        ([_binding_entity("team-a", "Viewer"), _binding_entity("team-b", "Viewer")], {"team-a"}),
+        ([_binding_entity("system", "HelixAdmin")], {"team-a"}),
+        ([], set()),
+    ],
+    ids=["bindings-capped", "helix-admin-capped", "no-bindings"],
+)
+async def test_workspace_limited_access_key_caps_accessible_workspaces(
+    workspace_auth: AuthClient, bindings: list[Entity], expected: set[str]
+) -> None:
+    async def list_entities(**kwargs):
+        matches = bindings if kwargs["filter_op"].value == TEST_PRINCIPAL else []
+        return matches, len(matches)
+
+    repository = AsyncMock()
+    repository.list_entities.side_effect = list_entities
+    workspace_auth.access_key_workspaces = ["team-a"]
+
+    assert await get_accessible_workspaces(repository) == expected

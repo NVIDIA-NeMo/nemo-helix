@@ -32,6 +32,8 @@ _ON_BEHALF_OF_EMAIL_HEADER = "x-nhx-principal-on-behalf-of-email"
 _ON_BEHALF_OF_GROUPS_HEADER = "x-nhx-principal-on-behalf-of-groups"
 _ON_BEHALF_OF_ACCOUNT_ID_HEADER = "x-nhx-subject-account-id"
 _ON_BEHALF_OF_ALIASES_HEADER = "x-nhx-subject-aliases"
+_ACCESS_KEY_JTI_HEADER = "x-nhx-access-key-jti"
+_ON_BEHALF_OF_ACCESS_KEY_JTI_HEADER = "x-nhx-subject-access-key-jti"
 _SCOPES_HEADER = "x-nhx-scopes"
 
 # Request-header sanitization drops identity, framing, and hop-by-hop metadata:
@@ -66,6 +68,8 @@ _STRIP_REQUEST_HEADERS = _HOP_BY_HOP_HEADERS | frozenset(
         _ON_BEHALF_OF_GROUPS_HEADER,
         _ON_BEHALF_OF_ACCOUNT_ID_HEADER,
         _ON_BEHALF_OF_ALIASES_HEADER,
+        _ACCESS_KEY_JTI_HEADER,
+        _ON_BEHALF_OF_ACCESS_KEY_JTI_HEADER,
         _SCOPES_HEADER,
     }
 )

@@ -17,6 +17,8 @@ TRUSTED_IDENTITY_HEADERS = frozenset(
         "x-nhx-principal-on-behalf-of-groups",
         "x-nhx-subject-account-id",
         "x-nhx-subject-aliases",
+        "x-nhx-access-key-jti",
+        "x-nhx-subject-access-key-jti",
         "x-nhx-scopes",
     }
 )

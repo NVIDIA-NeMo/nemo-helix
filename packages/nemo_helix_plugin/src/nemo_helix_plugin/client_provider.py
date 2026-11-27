@@ -160,6 +160,8 @@ def _build_headers(
                 headers["X-NHX-Principal-Email"] = principal["email"]
             if principal.get("groups"):
                 headers["X-NHX-Principal-Groups"] = ",".join(principal["groups"])
+            if principal.get("access_key_jti"):
+                headers["X-NHX-Access-Key-Jti"] = principal["access_key_jti"]
             if principal.get("on_behalf_of"):
                 headers["X-NHX-Principal-On-Behalf-Of"] = principal["on_behalf_of"]
                 if principal.get("on_behalf_of_email"):
@@ -170,6 +172,8 @@ def _build_headers(
                     headers["X-NHX-Subject-Account-Id"] = principal["on_behalf_of_account_id"]
                 if principal.get("on_behalf_of_authz_aliases"):
                     headers["X-NHX-Subject-Aliases"] = ",".join(principal["on_behalf_of_authz_aliases"])
+                if principal.get("on_behalf_of_access_key_jti"):
+                    headers["X-NHX-Subject-Access-Key-Jti"] = principal["on_behalf_of_access_key_jti"]
 
     if on_behalf_of is not None:
         # An explicit override wins over any on-behalf-of delegation carried by
@@ -180,6 +184,7 @@ def _build_headers(
         headers.pop("X-NHX-Principal-On-Behalf-Of-Groups", None)
         headers.pop("X-NHX-Subject-Account-Id", None)
         headers.pop("X-NHX-Subject-Aliases", None)
+        headers.pop("X-NHX-Subject-Access-Key-Jti", None)
         headers.update(_delegated_principal_headers(on_behalf_of))
 
     return headers
@@ -198,6 +203,10 @@ def _delegated_principal_headers(on_behalf_of: str | RuntimePrincipal) -> dict[s
         headers["X-NHX-Subject-Account-Id"] = effective.account_id
     if effective.authz_aliases:
         headers["X-NHX-Subject-Aliases"] = ",".join(effective.authz_aliases)
+    # getattr: principals from an older nhx-common have no access_key_jti.
+    access_key_jti = getattr(effective, "access_key_jti", None)
+    if access_key_jti:
+        headers["X-NHX-Subject-Access-Key-Jti"] = access_key_jti
     return headers
 
 

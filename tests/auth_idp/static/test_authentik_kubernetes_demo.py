@@ -40,11 +40,12 @@ AUTH_CALLOUT_RESPONSE_PRINCIPAL_HEADERS = {
     "x-nhx-principal-on-behalf-of",
     "x-nhx-subject-account-id",
     "x-nhx-subject-aliases",
+    "x-nhx-access-key-jti",
     "x-nhx-principal-on-behalf-of-email",
     "x-nhx-principal-on-behalf-of-groups",
     "x-nhx-scopes",
 }
-SEALED_EXTERNAL_PRINCIPAL_HEADERS = AUTH_CALLOUT_RESPONSE_PRINCIPAL_HEADERS
+SEALED_EXTERNAL_PRINCIPAL_HEADERS = AUTH_CALLOUT_RESPONSE_PRINCIPAL_HEADERS | {"x-nhx-subject-access-key-jti"}
 
 
 def _strip_leading_helm_spdx_comments(template: str) -> str:

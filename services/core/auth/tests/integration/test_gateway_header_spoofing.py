@@ -4,22 +4,11 @@
 from pathlib import Path
 
 import yaml
+from nhx.common.auth.headers import TRUSTED_IDENTITY_HEADERS
 
 from tests.auth_idp.providers import load_provider_names_by_mode
 
-REQUIRED_STRIPPED_HEADERS = {
-    "x-nhx-principal-id",
-    "x-nhx-actor-account-id",
-    "x-nhx-principal-email",
-    "x-nhx-principal-groups",
-    "x-nhx-actor-aliases",
-    "x-nhx-principal-on-behalf-of",
-    "x-nhx-subject-account-id",
-    "x-nhx-subject-aliases",
-    "x-nhx-principal-on-behalf-of-email",
-    "x-nhx-principal-on-behalf-of-groups",
-    "x-nhx-scopes",
-}
+REQUIRED_STRIPPED_HEADERS = TRUSTED_IDENTITY_HEADERS
 
 
 def _lua_removed_headers(http_filters: list[dict]) -> set[str]:
