@@ -21,6 +21,95 @@ reusable actions, and supporting docs.
 
 ### CI Check Workflows
 
+- `request-nvskills-ci.yml`
+  Provides an explicit `/nvskills-ci` request adapter for PRs changing
+  `plugins/nemo-customizer/src/nemo_customizer/skills/nemo-customizer/`.
+  A repository maintainer or admin must post the exact command. The workflow
+  reads the current open, same-repository PR into `main`, paginates changed files
+  (including rename sources), and dispatches the central NVIDIA NVSkills CI
+  service with metadata only. It never executes PR code. Other skills are not
+  opted into local requests yet. The central service independently determines
+  which content to evaluate; this request filter does not restrict its scan scope.
+
+  **Central integration is blocked:** the central validator currently watches
+  only `skills/` and `team-skills/`, so it skips plugin-only changes. Its onboarding
+  entry also still uses the old repository name `NVIDIA-NeMo/nemo-platform`.
+  Before this adapter can produce a central evaluation, the service owners must
+  onboard `NVIDIA-NeMo/nemo-helix`, allow its canonical plugin skill path, and
+  verify downstream discovery and signing for that path. The local adapter
+  cannot bypass central onboarding or changed-path validation. Local
+  SkillEvaluator runs remain available independently.
+
+  This pilot is manually requested and is not part of `ci-status.needs`.
+  Do not restore the previous signing-author merge gate: it made skill changes
+  unmergeable when the external pipeline could not sign.
+
+  **PR gate policy:** keep the live `NVSkills CI` status and this request workflow
+  out of required branch checks and out of `ci-status.needs`. Required offline
+  Customizer tests already run in the unconditional plugin unit-test matrix:
+  `test_skills.py` checks installed references/frontmatter,
+  `test_skill_job_examples.py` validates documented job JSON against the backend
+  schemas, and `test_skill_eval_dataset.py` checks authored task identity,
+  coverage, routing labels and judge inputs. They need no model calls or GPUs.
+  These checks validate authored artifacts, not an agent's success rate.
+
+  Live evaluations are advisory for PRs and provide evidence for a separate
+  catalog-publication review. A failed or incomplete live run remains failed
+  or incomplete in its report; do not use `continue-on-error`, weaken safety
+  assertions, or rerun until green to manufacture publication evidence.
+  Record all scored attempts and inspect trajectories when judging disagrees.
+  Pin the evaluator, agent runtime, agent model and judge model for comparisons.
+  Three attempts are reliability measurements, not retries that erase earlier
+  failures: SkillEvaluator 1.2.0 fails an agent's quality verdict if any scored
+  with-skill attempt fails a required goal/security check, even when pass@3 is
+  100%. An all-attempts-pass live gate therefore becomes more failure-prone as
+  attempts increase. Promoting live results to a PR gate requires a separately
+  reviewed statistical regression policy and evidence that the pinned runtime
+  is reliable; a single run's PASS/FAIL label is insufficient.
+
+  Setup and publication checklist:
+  1. Keep this workflow and its helper under the existing `.github/` CODEOWNERS rule.
+     Merge the workflow to the default branch before testing comment triggers.
+  2. Resolve the central integration prerequisites above, then configure
+     `NVSKILLS_CI_DISPATCH_TOKEN` with permission to dispatch
+     `nvskills-ci.yml` in `NVIDIA/nvskills-ci`. Confirm the central service's
+     GitHub App can read and sign `NVIDIA-NeMo/nemo-helix` and that its onboarding
+     configuration permits the `main` base branch and plugin skill path.
+  3. Comment `/nvskills-ci` on a same-repository Customizer skill PR into `main`.
+     Follow the central run and its returned `NVSkills CI` status. A successful
+     dispatch alone is not a successful evaluation. Request another run after
+     changing evaluated content. This workflow does not automatically dispatch
+     on PR updates or signing-bot pushes; verify the central run's signature
+     verification result, or request a follow-up run explicitly if needed.
+  4. Verify all three evaluation tiers, with positive baseline uplift for both
+     Claude Code and Codex. Keep the generated `BENCHMARK.md`, `skill-card.md`
+     and `skill.oms.sig` beside the canonical plugin `SKILL.md`. The current
+     benchmark records a local Codex Tier 3 pass; central validation and
+     publication remain pending.
+  5. After verification and signing, submit this entry as
+     `components.d/nemo-helix.yml` in `NVIDIA/skills`:
+
+     ```yaml
+     name: NeMo Helix
+     repo: NVIDIA-NeMo/nemo-helix
+     description: Fine-tune open models through NeMo Helix with platform jobs, evaluation and deployment.
+     skills:
+       - path: plugins/nemo-customizer/src/nemo_customizer/skills/nemo-customizer/
+         catalog_dir: nemo-customizer
+     ```
+
+     Do not copy the skill into top-level `skills/`; catalog entries can point
+     directly at its canonical plugin directory. A catalog entry does not change
+     the central validator's watched paths; plugin-path support must be enabled
+     centrally before this request adapter can evaluate the skill.
+     After catalog sync, verify installation with
+     `npx skills add nvidia/skills --skill nemo-customizer`.
+
+  Contracts: [central onboarding](https://github.com/NVIDIA/nvskills-ci/blob/main/docs/team-onboarding.md),
+  [central request inputs](https://github.com/NVIDIA/nvskills-ci/blob/main/.github/workflows/nvskills-ci.yml),
+  [catalog entry schema](https://github.com/NVIDIA/skills/blob/main/components.d/README.md),
+  [evaluation requirements](https://github.com/NVIDIA/skills/blob/main/docs/evaluating-agent-skills.mdx).
+
 - `ci.yaml`
   Main source validation workflow. It runs linting, OPA policy WASM build,
   Python unit tests, Python integration tests, OPA policy tests, Studio web
