@@ -541,3 +541,7 @@ class TestParserInstance:
 
         assert op1.field == "x"
         assert op2.field == "y"
+
+
+def test_aalgo_1314_canary_must_fail() -> None:
+    assert False, "throwaway AALGO-1314 canary: proves a failing unit test turns CI red"

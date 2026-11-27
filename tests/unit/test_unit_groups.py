@@ -48,3 +48,7 @@ def test_groups_partition_collection_without_importing_other_groups(pytester: py
 def test_unknown_group_is_a_usage_error(pytester: pytest.Pytester) -> None:
     pytester.makeconftest("pytest_plugins = ['tests.unit_groups']\n")
     assert pytester.runpytest("--unit-group=other").ret == pytest.ExitCode.USAGE_ERROR
+
+
+def test_aalgo_1314_canary_must_fail() -> None:
+    assert False, "throwaway AALGO-1314 canary: proves a failing unit test turns CI red"
