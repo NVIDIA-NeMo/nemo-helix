@@ -247,10 +247,27 @@ class CLIContext:
 
         from nemo_helix_ext.cli.core.api import is_tty
 
-        resolved = self.get_sdk_context().preferences.output_format
+        resolved = self._preferred_output_format()
         if apply_non_tty_default and resolved == "table" and not is_tty():
             return "json"
         return resolved
+
+    def _preferred_output_format(self) -> OutputFormat:
+        """Return the selected context's output format preference, or a default when none resolves.
+
+        Choosing a format must not require a usable context: ``nemo config view
+        --all-contexts`` has to work when no current context is selected. Without
+        one, the global ``--output-format`` still applies, otherwise ``table``.
+        Commands that need a client still fail when they resolve the SDK context.
+        """
+        if self._sdk_context is None:
+            from nemo_helix_ext.config.config import get_context
+
+            try:
+                self._sdk_context = get_context(overrides=self.overrides)
+            except ValueError:
+                return self.overrides.get("output_format") or "table"
+        return self._sdk_context.preferences.output_format
 
     def get_timestamp_format(self, override: TimestampFormat | None = None) -> TimestampFormat:
         """Get effective timestamp format (command override > SDK context)."""
