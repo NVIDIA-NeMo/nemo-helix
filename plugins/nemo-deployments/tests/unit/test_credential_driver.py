@@ -125,7 +125,7 @@ class Harness:
         assert "/workspaces/helix-team/secrets/service-token" in request.url.path
         payload = {"id": "secret-id", "name": "service-token", "workspace": "helix-team"}
         if request.url.path.endswith("/access"):
-            assert "X-NHX-Principal-On-Behalf-Of" not in request.headers
+            assert request.headers.get("X-NHX-Principal-On-Behalf-Of") == self.scope.principal_id
             payload["value"] = self.secret
         return httpx.Response(200, json=payload)
 
@@ -741,31 +741,39 @@ async def test_revoke_or_expiry_during_secret_read_wins(harness: Harness, change
     from nemo_deployments_plugin.backends.openshell.credential_driver.service import CredentialDriver
 
     handle = harness.registry.register(harness.owner, await harness.issue())
-    original = harness.client.access_secret
+    with_headers = harness.client.with_headers
 
-    async def access(**kwargs):
-        response = await original(**kwargs)
-        if change == "revoke":
-            harness.registry.revoke_job("job-1")
-        else:
-            harness.traveller.shift(31)
-        return response
+    def delegated(headers):
+        # The driver reads the secret through a per-creator copy of the client.
+        client = with_headers(headers)
+        original = client.access_secret
 
-    harness.client.access_secret = AsyncMock(side_effect=access)
-    driver = CredentialDriver(harness.registry, harness.client, cache_lifetime=30)
-    with pytest.raises(RegistrationDenied):
-        await driver._dispatch(
-            "ResolveCredentials",
-            {
-                "credentials": [
-                    {
-                        **harness.owner.model_dump(),
-                        "handle": {"driver": "nemo", "handle": handle},
-                        "request_id": "read",
-                    }
-                ]
-            },
-        )
+        async def access(**kwargs):
+            response = await original(**kwargs)
+            if change == "revoke":
+                harness.registry.revoke_job("job-1")
+            else:
+                harness.traveller.shift(31)
+            return response
+
+        client.access_secret = AsyncMock(side_effect=access)
+        return client
+
+    with patch.object(harness.client, "with_headers", delegated):
+        driver = CredentialDriver(harness.registry, harness.client, cache_lifetime=30)
+        with pytest.raises(RegistrationDenied):
+            await driver._dispatch(
+                "ResolveCredentials",
+                {
+                    "credentials": [
+                        {
+                            **harness.owner.model_dump(),
+                            "handle": {"driver": "nemo", "handle": handle},
+                            "request_id": "read",
+                        }
+                    ]
+                },
+            )
 
 
 @pytest.mark.asyncio

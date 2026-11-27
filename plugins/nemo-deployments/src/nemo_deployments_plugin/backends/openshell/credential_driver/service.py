@@ -282,7 +282,14 @@ class CredentialDriver(driver_grpc.CredentialDriverServicer):
                 async with asyncio.timeout(15):
                     await self._require_active_workload(binding.claims.workload)
                     await self._require_creator_access(binding.claims.principal_id, binding.claims.secret_workspace)
-                    response = await self.secrets_client.access_secret(
+                    # /access needs the creator as the on-behalf-of principal so the secrets
+                    # service re-checks secrets.read for them rather than trusting the bare service.
+                    access_client = self.secrets_client
+                    if binding.claims.principal_id is not None:
+                        access_client = self.secrets_client.with_headers(
+                            {"X-NHX-Principal-On-Behalf-Of": binding.claims.principal_id}
+                        )
+                    response = await access_client.access_secret(
                         workspace=binding.claims.secret_workspace,
                         name=binding.claims.secret_name,
                     )
