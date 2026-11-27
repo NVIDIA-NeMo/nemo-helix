@@ -324,11 +324,8 @@ async def test_an_evaluation_denied_before_acceptance_is_a_nonretryable_403_nami
     assert detail.startswith(f"run {retry.json()['run_id']}:")
 
 
-async def test_a_keyed_retry_against_a_republished_taskset_is_a_nonretryable_409(
-    run_client, service, published, request_body, fake_evaluations, entity_store, monkeypatch
-):
-    """The failed attempt's Evaluation names the old revision; publishing into it would mislabel every trial."""
-    body = request_body | {"publication": {"intake": {"experiment": "swe-agent-tuning"}}}
+async def _leave_an_evaluation(run_client, service, body, monkeypatch) -> None:
+    """Submit ``body`` once with an accept that fails, leaving the run's Intake Evaluation behind."""
     accept = service._store.accept
 
     async def failing_accept(acceptance):
@@ -336,6 +333,16 @@ async def test_a_keyed_retry_against_a_republished_taskset_is_a_nonretryable_409
 
     monkeypatch.setattr(service._store, "accept", failing_accept)
     assert (await run_client.post(PATH, json=body)).status_code == 500
+    monkeypatch.setattr(service._store, "accept", accept)
+
+
+@pytest.mark.parametrize("params", [None, DRY_RUN], ids=["submit", "dry run"])
+async def test_a_keyed_retry_against_a_republished_taskset_is_a_nonretryable_409(
+    run_client, service, published, request_body, fake_evaluations, entity_store, monkeypatch, params
+):
+    """The failed attempt's Evaluation names the old revision; publishing into it would mislabel every trial."""
+    body = request_body | {"publication": {"intake": {"experiment": "swe-agent-tuning"}}}
+    await _leave_an_evaluation(run_client, service, body, monkeypatch)
     old_version = fake_evaluations.created[0].dataset_version
     task = await entity_store.get(TaskEntity, "task-1", workspace="default")
     task.spec.instruction = "Solve the task, revised."
@@ -345,9 +352,8 @@ async def test_a_keyed_retry_against_a_republished_taskset_is_a_nonretryable_409
     head.tasks = [TaskRef(f"default/task-1#{revision.content_hash}")]
     await entity_store.update(head)
     await publish_revision(entity_store, entity_store, head, TasksetRevisionEntity)
-    monkeypatch.setattr(service._store, "accept", accept)
 
-    response = await run_client.post(PATH, json=body)
+    response = await run_client.post(PATH, params=params, json=body)
     assert response.status_code == 409, response.text
     assert response.headers["x-should-retry"] == "false"
     assert "created with different dataset metadata" in response.json()["detail"]
@@ -355,6 +361,40 @@ async def test_a_keyed_retry_against_a_republished_taskset_is_a_nonretryable_409
     assert not (await entity_store.list(TasksetRunEntity, workspace="default")).data
     (evaluation,) = fake_evaluations.evaluations.values()
     assert evaluation.dataset_version == old_version  # untouched
+
+
+@pytest.mark.parametrize("params", [None, DRY_RUN], ids=["submit", "dry run"])
+async def test_an_evaluation_under_the_runs_name_that_isnt_its_own_is_refused(
+    run_client, service, published, request_body, fake_evaluations, entity_store, monkeypatch, params
+):
+    body = request_body | {"publication": {"intake": {"experiment": "swe-agent-tuning"}}}
+    await _leave_an_evaluation(run_client, service, body, monkeypatch)
+    [(name, evaluation)] = fake_evaluations.evaluations.items()
+    fake_evaluations.evaluations[name] = evaluation.model_copy(update={"metadata": {}})
+
+    response = await run_client.post(PATH, params=params, json=body)
+
+    assert response.status_code == 503, response.text
+    assert "belongs to something else" in response.json()["detail"]
+    assert not (await entity_store.list(TasksetRunEntity, workspace="default")).data
+
+
+async def test_a_dry_run_for_an_accepted_runs_key_returns_it_as_submit_does(
+    run_client, published, request_body, fake_evaluations, entity_store
+):
+    """Submit returns an accepted run before touching its Evaluation, so a later republish refuses neither."""
+    body = request_body | {"publication": {"intake": {"experiment": "swe-agent-tuning"}}}
+    accepted = (await run_client.post(PATH, json=body)).json()
+    [(name, evaluation)] = fake_evaluations.evaluations.items()
+    fake_evaluations.evaluations[name] = evaluation.model_copy(update={"dataset_version": "another-revision"})
+
+    response = await run_client.post(PATH, params=DRY_RUN, json=body)
+
+    assert response.status_code == 200, response.text
+    assert response.json()["warnings"] == [
+        f"submitting returns run {accepted['run_id']}, which this idempotency_key already accepted"
+    ]
+    assert (await run_client.post(PATH, json=body)).status_code == 200
 
 
 async def test_an_unreadable_experiment_is_403(run_client, published, request_body, fake_evaluations):

@@ -5,7 +5,8 @@
 
 import asyncio
 import logging
-from collections.abc import Callable, Coroutine, Iterable
+from collections.abc import Callable, Coroutine, Generator, Iterable
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -70,6 +71,7 @@ from nemo_evals.taskset_runs.run_evaluation import (
     ForeignEvaluationError,
     IntakeRunEvaluations,
     RunEvaluations,
+    check_run_evaluation,
     ensure_run_evaluation,
 )
 from nemo_evals.taskset_runs.specs import PlannedAgentLayers, RunIntakePublication, TasksetRunPlan
@@ -197,6 +199,22 @@ async def pin_taskset_ref(entity_client: EntityClient, ref: TasksetRef, workspac
     except (NemoEntityNotFoundError, RevisionNotFoundError) as exc:
         raise TasksetRunResolutionError(str(exc)) from exc
     return TasksetRef(f"{source_workspace}/{name}#{revision.content_hash}")
+
+
+@contextmanager
+def _run_evaluation_errors(run_id: str, verb: str, doing: str) -> Generator[None]:
+    """Map what Intake answers about run ``run_id``'s Evaluation to submit's errors; ``verb`` and ``doing`` name the call."""
+    try:
+        yield
+    except ForeignEvaluationError as exc:
+        raise RunEvaluationError(run_id, str(exc)) from exc
+    except EvaluationDatasetMismatchError as exc:
+        raise RunEvaluationMismatchError(run_id, str(exc)) from exc
+    except PermissionDeniedError as exc:
+        # Submit checked the permission just before, so it was revoked since; retrying can't help.
+        raise RunEvaluationDeniedError(run_id, f"Intake refused to {verb} its Evaluation") from exc
+    except NemoClientError as exc:
+        raise RunEvaluationError(run_id, f"{doing} its Intake Evaluation failed: {exc}") from exc
 
 
 def _never_run(write: object) -> None:
@@ -569,8 +587,11 @@ class TasksetRunService:
             intake = await self._resolve_publication(req, workspace, spec, taskset_ref=pinned.root)
             prepared, task_notices = await self._prepare_images(spec.tasks, policy, caller=caller)
             if dry_run:
-                # Nothing below checks anything a write wouldn't, so a dry run stops here.
+                # Below, only the Evaluation's create-or-adopt checks more than a write would, so a dry run reads
+                # what it would find and stops here. A replay returns the accepted run before any of it.
                 await self._authorize_plan(workspace, run_id)
+                if intake is not None and replay is None:
+                    await self._check_run_evaluation(workspace, run_id, intake)
                 active = await self._duplicate_warnings(workspace, pinned.root, run_id, caller)
                 return TasksetRunDryRunResponse(
                     taskset=pinned.root,
@@ -808,18 +829,20 @@ class TasksetRunService:
                 accepted; a retry with the same idempotency_key adopts an Evaluation this attempt created.
         """
         assert plan.intake is not None
-        try:
+        with _run_evaluation_errors(plan.run_id, "create", "creating"):
             await ensure_run_evaluation(self._evaluations, plan.workspace, plan.run_id, plan)
-        except ForeignEvaluationError as exc:
-            raise RunEvaluationError(plan.run_id, str(exc)) from exc
-        except EvaluationDatasetMismatchError as exc:
-            raise RunEvaluationMismatchError(plan.run_id, str(exc)) from exc
-        except PermissionDeniedError as exc:
-            # Submit checked the permission just before, so it was revoked since; retrying can't help.
-            raise RunEvaluationDeniedError(plan.run_id, "Intake refused to create its Evaluation") from exc
-        except NemoClientError as exc:
-            raise RunEvaluationError(plan.run_id, f"creating its Intake Evaluation failed: {exc}") from exc
         return [f"Intake: Evaluation {plan.run_id} in Experiment {plan.intake.experiment}"]
+
+    async def _check_run_evaluation(self, workspace: str, run_id: str, intake: RunIntakePublication) -> None:
+        """Refuse a dry run that :meth:`_ensure_run_evaluation` would refuse on submit, creating nothing.
+
+        Raises:
+            RunEvaluationDeniedError: Intake refused the caller the Evaluation.
+            RunEvaluationMismatchError: The run's Evaluation exists with another dataset.
+            RunEvaluationError: The Evaluation isn't the run's, or Intake failed to read it.
+        """
+        with _run_evaluation_errors(run_id, "read", "reading"):
+            await check_run_evaluation(self._evaluations, workspace, run_id, intake)
 
     async def _resolve(
         self, req: TasksetRunInput, workspace: str, *, dry_run: bool = False
