@@ -59,11 +59,18 @@ function Host({ onChange }: { onChange: (value: string | null) => void }) {
 }
 
 describe('DatasetPicker', () => {
+  let listRequests = 0;
+
   beforeEach(() => {
     const created = new Map<string, FilesetOutput>();
+    listRequests = 0;
     server.use(
-      // Serves both the picker's list and the panel's name check; nothing exists until created.
-      http.get(FILESETS_URL, () => page([])),
+      // Serves both the picker's list and the panel's name check (`filter[name]`).
+      http.get(FILESETS_URL, ({ request }) => {
+        const name = new URL(request.url).searchParams.get('filter[name]');
+        if (name === null) listRequests += 1;
+        return page(name === null ? [...created.values()] : []);
+      }),
       http.get(`${FILESETS_URL}/:name`, ({ params }) => {
         const fileset = created.get(params.name as string);
         return fileset
@@ -96,6 +103,7 @@ describe('DatasetPicker', () => {
     await waitFor(() =>
       expect(screen.getByRole('textbox', { name: 'Name' })).toHaveValue('alpaca')
     );
+    const listRequestsBeforeCreate = listRequests;
     await user.click(screen.getByRole('button', { name: 'Create Dataset' }));
 
     await waitFor(() => expect(onChange).toHaveBeenCalledWith(`${WS}/alpaca`));
@@ -103,6 +111,14 @@ describe('DatasetPicker', () => {
       expect(screen.queryByRole('button', { name: 'Create Dataset' })).not.toBeInTheDocument()
     );
     expect(input).toHaveValue('alpaca');
+
+    // The create refetches the picker's list, so the new dataset is a regular, selected row.
+    await waitFor(() => expect(listRequests).toBeGreaterThan(listRequestsBeforeCreate));
+    await user.click(input);
+    expect(await screen.findByRole('option', { name: /alpaca/ })).toHaveAttribute(
+      'aria-selected',
+      'true'
+    );
   });
 
   it('leaves the selection alone when the panel is cancelled', async () => {

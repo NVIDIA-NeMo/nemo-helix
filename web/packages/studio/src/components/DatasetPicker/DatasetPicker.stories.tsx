@@ -92,7 +92,8 @@ function Harness(): ReactElement {
 }
 
 const meta = {
-  title: 'UI/DatasetPicker',
+  // Shares the FilesetPicker's title so these sit beside its stories.
+  title: 'UI/FilesetPicker',
   component: Harness,
   parameters: {
     msw: {
@@ -109,8 +110,8 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 /** Pick "New dataset" to open the Create Dataset panel; the dataset it creates becomes the value. */
-export const Default: Story = {};
+export const CreateDataset: Story = {};
 
-export const EmptyWorkspace: Story = {
+export const CreateDatasetInEmptyWorkspace: Story = {
   parameters: { msw: { handlers: filesApi([]) } },
 };
