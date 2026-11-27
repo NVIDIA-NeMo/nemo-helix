@@ -48,7 +48,7 @@ jobs:
         with:
           name: nhx-builder
           driver: docker-container
-          cleanup: true
+          cleanup: false
 
       - name: Configure bake variables
         shell: bash
@@ -113,7 +113,7 @@ jobs:
         with:
           name: nhx-builder
           driver: docker-container
-          cleanup: true
+          cleanup: false
 
       - name: Configure bake variables
         shell: bash

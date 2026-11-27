@@ -410,7 +410,7 @@ jobs:
         with:
           name: nhx-builder
           driver: docker-container
-          cleanup: true
+          cleanup: false
 
       - name: Resolve bake cache branch
         id: cache-branch
@@ -497,7 +497,7 @@ jobs:
         with:
           name: nhx-builder
           driver: docker-container
-          cleanup: true
+          cleanup: false
 
       - name: Resolve bake cache branch
         id: cache-branch
