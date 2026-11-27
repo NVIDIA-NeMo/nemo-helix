@@ -9,14 +9,25 @@ from nhx.core.models.schemas import ModelEntityFilter
 
 CAPABILITIES = "data.metadata.capabilities"
 CONTEXT_LENGTH = "data.metadata.context_length"
+MODEL_PROVIDERS = "data.model_providers"
 
 
 def _translate(field: str, operator: FilterOperator, value: Any):
     return ModelEntityFilter.translate_operation(ComparisonOperation(operator=operator, field=field, value=value))
 
 
-def _contains(value: str) -> ComparisonOperation:
-    return ComparisonOperation(operator=FilterOperator.CONTAINS, field=CAPABILITIES, value=value)
+def _split(value: Any) -> Any:
+    if isinstance(value, str):
+        return value.split(",")
+    return value
+
+
+def _contains(value: str, field: str = CAPABILITIES) -> ComparisonOperation:
+    return ComparisonOperation(operator=FilterOperator.CONTAINS, field=field, value=value)
+
+
+def _contains_any(values: list[str], field: str = CAPABILITIES) -> ComparisonOperation:
+    return ComparisonOperation(operator=FilterOperator.ELEM_MATCH, field=field, value={"$in": values})
 
 
 def test_list_field_eq_scalar_becomes_contains():
@@ -30,8 +41,8 @@ def test_list_field_eq_list_requires_every_value():
 
 
 def test_list_field_in_matches_any_value():
-    assert _translate("capabilities", FilterOperator.IN, ["tool_calling", "reasoning"]) == LogicalOperation(
-        operator=FilterOperator.OR, operations=[_contains("tool_calling"), _contains("reasoning")]
+    assert _translate("capabilities", FilterOperator.IN, ["tool_calling", "reasoning"]) == _contains_any(
+        ["tool_calling", "reasoning"]
     )
 
 
@@ -48,7 +59,7 @@ def _present_and_not(operation: ComparisonOperation | LogicalOperation) -> Logic
 
 def test_list_field_nin_requires_the_field_and_negates_any_match():
     assert _translate("capabilities", FilterOperator.NIN, ["embedding", "reasoning"]) == _present_and_not(
-        LogicalOperation(operator=FilterOperator.OR, operations=[_contains("embedding"), _contains("reasoning")])
+        _contains_any(["embedding", "reasoning"])
     )
 
 
@@ -64,6 +75,36 @@ def test_list_field_rewrites_inside_logical_operations():
     assert ModelEntityFilter.translate_operation(operation) == LogicalOperation(
         operator=FilterOperator.NOT, operations=[_contains("reasoning")]
     )
+
+
+@pytest.mark.parametrize("field", ["model_providers", MODEL_PROVIDERS])
+def test_provider_field_matches_by_membership_under_either_name(field: str):
+    assert _translate(field, FilterOperator.EQ, "default/a") == _contains("default/a", MODEL_PROVIDERS)
+    assert _translate(field, FilterOperator.IN, ["default/a", "default/b"]) == _contains_any(
+        ["default/a", "default/b"], MODEL_PROVIDERS
+    )
+
+
+def test_list_field_matches_by_membership_under_its_entity_path():
+    assert _translate(CAPABILITIES, FilterOperator.EQ, "reasoning") == _contains("reasoning")
+
+
+def test_provider_field_nin_keeps_models_without_a_provider_list():
+    assert _translate("model_providers", FilterOperator.NIN, ["default/a", "default/b"]) == LogicalOperation(
+        operator=FilterOperator.NOT, operations=[_contains_any(["default/a", "default/b"], MODEL_PROVIDERS)]
+    )
+
+
+@pytest.mark.parametrize("value", ["", 7, None, [], ["default/a", ""], "default/a,"])
+def test_provider_field_rejects_invalid_values(value: Any):
+    with pytest.raises(ValueError, match="for filter field 'model_providers'"):
+        _translate("model_providers", FilterOperator.IN, value if isinstance(value, list) else _split(value))
+
+
+@pytest.mark.parametrize("field", ["model_providers", MODEL_PROVIDERS])
+def test_provider_field_rejects_other_operators(field: str):
+    with pytest.raises(ValueError, match=rf"\$like is not supported for filter field '{field}'"):
+        _translate(field, FilterOperator.LIKE, "default/a")
 
 
 @pytest.mark.parametrize(

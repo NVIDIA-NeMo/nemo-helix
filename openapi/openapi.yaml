@@ -20699,9 +20699,16 @@ components:
           description: Filter by model architecture family (e.g. 'llama', 'mixtral').
           title: Family
         model_providers:
-          description: Filter models served by this ModelProvider, in the form {workspace}/{provider_name}.
+          anyOf:
+          - type: string
+          - items:
+              type: string
+            type: array
+          description: Filter models served by a ModelProvider, in the form {workspace}/{provider_name}.
+            A name without a workspace is looked up in the workspace being listed.
+            A list matches models served by all of them; use $in for any and $nin
+            for none, e.g. filter[model_providers][$in]=default/a&filter[model_providers][$in]=default/b.
           title: Model Providers
-          type: string
         display_name:
           anyOf:
           - $ref: '#/components/schemas/StringFilter'

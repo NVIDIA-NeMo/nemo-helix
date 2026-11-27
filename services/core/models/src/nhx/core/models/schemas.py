@@ -1396,11 +1396,13 @@ def _adapters_as_exists(operation: FilterOperation) -> FilterOperation:
     return operation
 
 
-_METADATA_LIST_FILTER_FIELDS: dict[str, type[StrEnum]] = {
+_LIST_FILTER_FIELDS: dict[str, type[StrEnum] | None] = {
+    "model_providers": None,
     "capabilities": ModelCapability,
     "input_modalities": ModelModality,
     "output_modalities": ModelModality,
 }
+_LIST_FILTER_FIELDS_EMPTY_WHEN_MISSING = frozenset({"model_providers"})
 _METADATA_NUMBER_FILTER_FIELDS = frozenset({"context_length", "max_output_tokens", "parameter_count"})
 # Metadata numbers are integers, so a fractional bound rounds to the integer bound that selects the same rows.
 _INTEGER_BOUND_ROUNDING = {
@@ -1426,7 +1428,11 @@ def _filter_values(field: str, value: Any) -> list[Any]:
     return values
 
 
-def _as_enum_value(field: str, enum_type: type[StrEnum], value: Any) -> str:
+def _as_list_value(field: str, enum_type: type[StrEnum] | None, value: Any) -> str:
+    if enum_type is None:
+        if not isinstance(value, str) or not value:
+            raise _invalid_filter_value(field, value)
+        return value
     try:
         return enum_type(value).value
     except (TypeError, ValueError):
@@ -1452,35 +1458,44 @@ def _as_integer(field: str, value: Any) -> int:
     return int(number)
 
 
-def _contains_each(field: str, enum_type: type[StrEnum], value: Any, combine: FilterOperator) -> FilterOperation:
-    comparisons: list[FilterOperation] = [
-        ComparisonOperation(operator=FilterOperator.CONTAINS, field=field, value=_as_enum_value(field, enum_type, item))
-        for item in _filter_values(field, value)
-    ]
-    if len(comparisons) == 1:
-        return comparisons[0]
-    return LogicalOperation(operator=combine, operations=comparisons)
+def _contains(field: str, value: str) -> ComparisonOperation:
+    return ComparisonOperation(operator=FilterOperator.CONTAINS, field=field, value=value)
+
+
+def _contains_all(field: str, values: list[str]) -> FilterOperation:
+    if len(values) == 1:
+        return _contains(field, values[0])
+    return LogicalOperation(operator=FilterOperator.AND, operations=[_contains(field, value) for value in values])
+
+
+def _contains_any(field: str, values: list[str]) -> ComparisonOperation:
+    if len(values) == 1:
+        return _contains(field, values[0])
+    return ComparisonOperation(operator=FilterOperator.ELEM_MATCH, field=field, value={FilterOperator.IN.value: values})
 
 
 def _negated(operation: FilterOperation) -> LogicalOperation:
     return LogicalOperation(operator=FilterOperator.NOT, operations=[operation])
 
 
-def _list_field_operation(operation: ComparisonOperation, enum_type: type[StrEnum]) -> FilterOperation:
-    field, operator, value = operation.field, operation.operator, operation.value
-    if operator in (FilterOperator.EQ, FilterOperator.CONTAINS):
-        return _contains_each(field, enum_type, value, FilterOperator.AND)
+_LIST_FILTER_OPERATORS = frozenset({FilterOperator.EQ, FilterOperator.CONTAINS, FilterOperator.IN, FilterOperator.NIN})
+
+
+def _list_field_operation(operation: ComparisonOperation, name: str) -> FilterOperation:
+    field, operator = operation.field, operation.operator
+    if operator not in _LIST_FILTER_OPERATORS:
+        raise _unsupported_filter_operator(field, operator)
+    enum_type = _LIST_FILTER_FIELDS[name]
+    values = [_as_list_value(field, enum_type, item) for item in _filter_values(field, operation.value)]
     if operator == FilterOperator.IN:
-        return _contains_each(field, enum_type, value, FilterOperator.OR)
-    if operator == FilterOperator.NIN:
-        return LogicalOperation(
-            operator=FilterOperator.AND,
-            operations=[
-                _negated(ComparisonOperation(operator=FilterOperator.EQ, field=field, value=None)),
-                _negated(_contains_each(field, enum_type, value, FilterOperator.OR)),
-            ],
-        )
-    raise _unsupported_filter_operator(field, operator)
+        return _contains_any(field, values)
+    if operator != FilterOperator.NIN:
+        return _contains_all(field, values)
+    contains_none = _negated(_contains_any(field, values))
+    if name in _LIST_FILTER_FIELDS_EMPTY_WHEN_MISSING:
+        return contains_none
+    is_missing = ComparisonOperation(operator=FilterOperator.EQ, field=field, value=None)
+    return LogicalOperation(operator=FilterOperator.AND, operations=[_negated(is_missing), contains_none])
 
 
 def _number_field_operation(operation: ComparisonOperation) -> FilterOperation:
@@ -1499,17 +1514,22 @@ def _number_field_operation(operation: ComparisonOperation) -> FilterOperation:
     raise _unsupported_filter_operator(field, operator)
 
 
-def _metadata_filter_values(operation: FilterOperation) -> FilterOperation:
-    """Validate metadata filter values, and match list fields by membership."""
+def _list_and_number_filter_values(operation: FilterOperation, names_by_entity_path: dict[str, str]) -> FilterOperation:
+    """Validate list and number filter values, and match list fields by membership."""
     if isinstance(operation, ComparisonOperation):
-        if operation.field in _METADATA_LIST_FILTER_FIELDS:
-            return _list_field_operation(operation, _METADATA_LIST_FILTER_FIELDS[operation.field])
+        name = names_by_entity_path.get(operation.field, operation.field)
+        if name in _LIST_FILTER_FIELDS:
+            return _list_field_operation(operation, name)
         if operation.field in _METADATA_NUMBER_FILTER_FIELDS:
             return _number_field_operation(operation)
         return operation
     if isinstance(operation, LogicalOperation):
         return operation.model_copy(
-            update={"operations": [_metadata_filter_values(child) for child in operation.operations]}
+            update={
+                "operations": [
+                    _list_and_number_filter_values(child, names_by_entity_path) for child in operation.operations
+                ]
+            }
         )
     return operation
 
@@ -1551,9 +1571,14 @@ class ModelEntityFilter(Filter):
         default=None,
         description="Filter by model architecture family (e.g. 'llama', 'mixtral').",
     )
-    model_providers: Optional[str] = Field(
+    model_providers: Annotated[str | list[str] | None, map_entity_field("data.model_providers")] = Field(
         default=None,
-        description="Filter models served by this ModelProvider, in the form {workspace}/{provider_name}.",
+        description=(
+            "Filter models served by a ModelProvider, in the form {workspace}/{provider_name}. "
+            "A name without a workspace is looked up in the workspace being listed. "
+            "A list matches models served by all of them; use $in for any and $nin for none, "
+            "e.g. filter[model_providers][$in]=default/a&filter[model_providers][$in]=default/b."
+        ),
     )
     display_name: Annotated[StringFilter | str | None, map_entity_field("data.metadata.display_name")] = Field(
         default=None, description="Filter by the display name in the model's metadata."
@@ -1593,7 +1618,10 @@ class ModelEntityFilter(Filter):
 
     @classmethod
     def translate_operation(cls, operation: FilterOperation) -> FilterOperation:
-        return super().translate_operation(_metadata_filter_values(_adapters_as_exists(operation)))
+        names_by_entity_path = {path: name for name, path in cls._get_entity_field_map().items()}
+        return super().translate_operation(
+            _list_and_number_filter_values(_adapters_as_exists(operation), names_by_entity_path)
+        )
 
 
 class AdapterEntityFilter(Filter):

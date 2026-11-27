@@ -98,14 +98,113 @@ def test_model_providers_filter_does_not_match_provider_name_prefix(test_clients
     assert _list_names(test_clients, {"filter[model_providers]": provider}) == [exact]
 
 
-def test_model_providers_filter_nested_in_or_is_rejected(test_clients: ClientContext):
-    provider = f"{DEFAULT_WORKSPACE}/{_uid('provider')}"
-    nested = json.dumps({"$or": [{"model_providers": provider}, {"name": _uid("any")}]})
+def test_model_providers_in_filter_matches_models_linked_to_any_provider(test_clients: ClientContext):
+    first_provider = f"{DEFAULT_WORKSPACE}/{_uid('provider')}"
+    second_provider = f"{DEFAULT_WORKSPACE}/{_uid('provider')}"
+    first = _uid("first")
+    second = _uid("second")
+    unlinked = _uid("unlinked")
+    _create_model(test_clients, first, model_providers=[first_provider])
+    _create_model(test_clients, second, model_providers=[second_provider])
+    _create_model(test_clients, unlinked, model_providers=[f"{DEFAULT_WORKSPACE}/{_uid('other')}"])
 
-    response = test_clients.test_client.get(MODELS_PATH, params={"filter": nested})
+    response = test_clients.test_client.get(
+        MODELS_PATH,
+        params=[
+            ("filter[model_providers][$in]", first_provider),
+            ("filter[model_providers][$in]", second_provider),
+        ],
+    )
+
+    assert response.status_code == 200, response.text
+    assert sorted(m["name"] for m in response.json()["data"]) == sorted([first, second])
+
+
+def test_model_providers_in_filter_with_one_provider(test_clients: ClientContext):
+    provider = f"{DEFAULT_WORKSPACE}/{_uid('provider')}"
+    linked = _uid("linked")
+    _create_model(test_clients, linked, model_providers=[provider])
+    _create_model(test_clients, _uid("unlinked"), model_providers=[f"{DEFAULT_WORKSPACE}/{_uid('other')}"])
+
+    assert _list_names(test_clients, {"filter[model_providers][$in]": provider}) == [linked]
+
+
+def test_model_providers_list_filter_matches_models_linked_to_every_provider(test_clients: ClientContext):
+    first_provider = f"{DEFAULT_WORKSPACE}/{_uid('provider')}"
+    second_provider = f"{DEFAULT_WORKSPACE}/{_uid('provider')}"
+    both = _uid("both")
+    _create_model(test_clients, both, model_providers=[first_provider, second_provider])
+    _create_model(test_clients, _uid("first-only"), model_providers=[first_provider])
+    nested = json.dumps({"model_providers": [first_provider, second_provider]})
+
+    assert _list_names(test_clients, {"filter": nested}) == [both]
+
+
+def test_model_providers_filter_by_entity_path(test_clients: ClientContext):
+    first_provider = f"{DEFAULT_WORKSPACE}/{_uid('provider')}"
+    second_provider = f"{DEFAULT_WORKSPACE}/{_uid('provider')}"
+    first = _uid("first")
+    second = _uid("second")
+    _create_model(test_clients, first, model_providers=[first_provider, f"{DEFAULT_WORKSPACE}/{_uid('extra')}"])
+    _create_model(test_clients, second, model_providers=[second_provider])
+    any_provider = json.dumps({"data.model_providers": {"$in": [first_provider, second_provider]}})
+
+    assert _list_names(test_clients, {"filter[data.model_providers]": first_provider}) == [first]
+    assert _list_names(test_clients, {"filter": any_provider}) == sorted([first, second])
+
+
+def test_model_providers_filter_without_workspace_uses_the_listed_workspace(test_clients: ClientContext):
+    provider_name = _uid("provider")
+    other_name = _uid("provider")
+    linked = _uid("linked")
+    other = _uid("other")
+    _create_model(test_clients, linked, model_providers=[f"{DEFAULT_WORKSPACE}/{provider_name}"])
+    _create_model(test_clients, other, model_providers=[f"{DEFAULT_WORKSPACE}/{other_name}"])
+    _create_model(test_clients, _uid("elsewhere"), model_providers=[f"elsewhere/{provider_name}"])
+
+    assert _list_names(test_clients, {"filter[model_providers]": provider_name}) == [linked]
+    assert _list_names(test_clients, {"filter[model_providers][$in]": f"{provider_name},{other_name}"}) == sorted(
+        [linked, other]
+    )
+
+
+def test_model_providers_filter_with_unsupported_operator_is_rejected(test_clients: ClientContext):
+    provider = f"{DEFAULT_WORKSPACE}/{_uid('provider')}"
+
+    response = test_clients.test_client.get(MODELS_PATH, params={"filter[model_providers][$like]": provider})
 
     assert response.status_code == 400, response.text
     assert "model_providers" in response.text
+
+
+def test_model_providers_filter_nested_in_or(test_clients: ClientContext):
+    provider = f"{DEFAULT_WORKSPACE}/{_uid('provider')}"
+    linked = _uid("linked")
+    named = _uid("named")
+    _create_model(test_clients, linked, model_providers=[provider])
+    _create_model(test_clients, named)
+    _create_model(test_clients, _uid("neither"), model_providers=[f"{DEFAULT_WORKSPACE}/{_uid('other')}"])
+    nested = json.dumps({"$or": [{"model_providers": provider}, {"name": named}]})
+
+    assert _list_names(test_clients, {"filter": nested}) == sorted([linked, named])
+
+
+def test_model_providers_nin_filter_excludes_models_linked_to_any_provider(test_clients: ClientContext):
+    family = _uid("fam")
+    excluded_provider = f"{DEFAULT_WORKSPACE}/{_uid('provider')}"
+    also_excluded_provider = f"{DEFAULT_WORKSPACE}/{_uid('provider')}"
+    kept = _uid("kept")
+    unserved = _uid("unserved")
+    _create_model(test_clients, _uid("excluded"), family=family, model_providers=[excluded_provider])
+    _create_model(test_clients, _uid("excluded"), family=family, model_providers=[also_excluded_provider])
+    _create_model(test_clients, kept, family=family, model_providers=[f"{DEFAULT_WORKSPACE}/{_uid('other')}"])
+    _create_model(test_clients, unserved, family=family)
+
+    params = {
+        "filter[family]": family,
+        "filter[model_providers][$nin]": f"{excluded_provider},{also_excluded_provider}",
+    }
+    assert _list_names(test_clients, params) == sorted([kept, unserved])
 
 
 def test_family_and_model_providers_filters_combine(test_clients: ClientContext):

@@ -80,6 +80,49 @@ def _expand_bare_fileset_equality(operation: FilterOperation, workspace: str) ->
     return operation
 
 
+_MODEL_PROVIDERS_FILTER_FIELD = "data.model_providers"
+
+
+def expand_bare_provider_names(operation: FilterOperation | None, workspace: str) -> FilterOperation | None:
+    """Match a bare provider name against that name and ``workspace/name``.
+
+    Listing across every workspace has no single workspace to qualify with, so those filters stay exact.
+    """
+    if operation is None or not workspace or workspace == ALL_WORKSPACES:
+        return operation
+    return _expand_bare_provider_names(operation, workspace)
+
+
+def _provider_names(operation: ComparisonOperation) -> list[str]:
+    value = operation.value
+    if operation.operator == FilterOperator.CONTAINS and isinstance(value, str):
+        return [value]
+    if operation.operator == FilterOperator.ELEM_MATCH and isinstance(value, dict):
+        names = value.get(FilterOperator.IN.value)
+        if isinstance(names, list):
+            return [name for name in names if isinstance(name, str)]
+    return []
+
+
+def _expand_bare_provider_names(operation: FilterOperation, workspace: str) -> FilterOperation:
+    if isinstance(operation, LogicalOperation):
+        return LogicalOperation(
+            operator=operation.operator,
+            operations=[_expand_bare_provider_names(child, workspace) for child in operation.operations],
+        )
+    if not isinstance(operation, ComparisonOperation) or operation.field != _MODEL_PROVIDERS_FILTER_FIELD:
+        return operation
+    names = _provider_names(operation)
+    qualified = [f"{workspace}/{name}" for name in names if "/" not in name]
+    if not qualified:
+        return operation
+    return ComparisonOperation(
+        operator=FilterOperator.ELEM_MATCH,
+        field=operation.field,
+        value={FilterOperator.IN.value: [*names, *qualified]},
+    )
+
+
 class InvalidFilterError(ValueError):
     """Exception raised for filter shapes the service can't honor (e.g. nested cross-entity fields)."""
 
@@ -495,23 +538,12 @@ class ModelEntityService:
                 parsed_filter.and_with(_build_lora_filter_operation(all_lora_ids, lora_exclude=True))
             # If no models have lora and lora_enabled=false, all models qualify — no extra filter.
 
-        model_provider = parsed_filter.remove("model_providers")
-        if parsed_filter.has("model_providers"):
-            raise InvalidFilterError(
-                "model_providers is only supported as a top-level equality filter; "
-                "remove it from $or, $not, or nested expressions."
-            )
-        if model_provider is not None:
-            parsed_filter.and_with(
-                ComparisonOperation(
-                    operator=FilterOperator.CONTAINS, field="data.model_providers", value=model_provider
-                )
-            )
-
         result: ListResponse[Model] = await self.entity_client.list(
             Model,
             workspace=workspace,
-            filter_operation=expand_bare_fileset_equality(parsed_filter.operation, workspace),
+            filter_operation=expand_bare_provider_names(
+                expand_bare_fileset_equality(parsed_filter.operation, workspace), workspace
+            ),
             sort=sort,
             page=page,
             page_size=page_size,

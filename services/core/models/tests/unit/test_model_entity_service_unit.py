@@ -22,6 +22,7 @@ from nhx.core.models.api.service.model_entity_service import (
     _model_to_model_entity,
     _repo_id_matches_trusted,
     expand_bare_fileset_equality,
+    expand_bare_provider_names,
 )
 from nhx.core.models.api.v2.models import is_trusted_repo_id
 from nhx.core.models.config import config
@@ -1781,3 +1782,33 @@ def test_qualified_fileset_filter_stays_exact():
 def test_all_workspaces_fileset_filter_stays_exact():
     operation = ComparisonOperation(operator=FilterOperator.EQ, field="data.fileset", value="llama")
     assert expand_bare_fileset_equality(operation, ALL_WORKSPACES) is operation
+
+
+def _provider_filter(operator: FilterOperator, value: Any) -> ComparisonOperation:
+    return ComparisonOperation(operator=operator, field="data.model_providers", value=value)
+
+
+def test_bare_provider_filter_matches_the_name_and_the_workspace_name():
+    expanded = expand_bare_provider_names(_provider_filter(FilterOperator.CONTAINS, "nim"), "default")
+    assert expanded == _provider_filter(FilterOperator.ELEM_MATCH, {"$in": ["nim", "default/nim"]})
+
+
+def test_bare_provider_names_in_a_list_are_qualified_alongside_the_rest():
+    operation = LogicalOperation(
+        operator=FilterOperator.NOT,
+        operations=[_provider_filter(FilterOperator.ELEM_MATCH, {"$in": ["other/a", "nim"]})],
+    )
+    assert expand_bare_provider_names(operation, "default") == LogicalOperation(
+        operator=FilterOperator.NOT,
+        operations=[_provider_filter(FilterOperator.ELEM_MATCH, {"$in": ["other/a", "nim", "default/nim"]})],
+    )
+
+
+def test_qualified_provider_filter_stays_exact():
+    operation = _provider_filter(FilterOperator.CONTAINS, "default/nim")
+    assert expand_bare_provider_names(operation, "default") is operation
+
+
+def test_all_workspaces_provider_filter_stays_exact():
+    operation = _provider_filter(FilterOperator.CONTAINS, "nim")
+    assert expand_bare_provider_names(operation, ALL_WORKSPACES) is operation
