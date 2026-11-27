@@ -874,8 +874,10 @@ jobs:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
           PYTEST_WORKERS: "4"
           PYTEST_EXTRA: --unit-group=${{ matrix.group }}
-          # coverage-comment reads only py3.12; tracing the other legs only slows them.
-          PYTEST_COVERAGE: ${{ matrix.python-version == '3.12' }}
+          # coverage-comment reads only py3.14; tracing the other legs only slows them. With
+          # `branch = true`, coverage can use sys.monitoring only on 3.14+; 3.12 and 3.13 fall
+          # back to the much slower CTracer.
+          PYTEST_COVERAGE: ${{ matrix.python-version == '3.14' }}
           _TYPER_FORCE_DISABLE_TERMINAL: "1"
       - name: Upload test artifacts
         if: always()
@@ -1991,7 +1993,7 @@ jobs:
         with:
           # One interpreter's groups, so the coverage table stays a single number. The combine
           # step below renders "N/A" unless every group's data is present.
-          pattern: python-unit-test-results-py3.12-*
+          pattern: python-unit-test-results-py3.14-*
           path: unit-coverage/groups
       - name: Download integration test coverage
         continue-on-error: true
@@ -2011,7 +2013,7 @@ jobs:
         shell: bash
         run: |
           for group in core plugins misc; do
-            test -s "unit-coverage/groups/python-unit-test-results-py3.12-${group}/.coverage"
+            test -s "unit-coverage/groups/python-unit-test-results-py3.14-${group}/.coverage"
           done
           uvx --from coverage==7.15.3 coverage combine --keep unit-coverage/groups/*/.coverage
           uvx --from coverage==7.15.3 coverage xml -o unit-coverage/coverage.xml
