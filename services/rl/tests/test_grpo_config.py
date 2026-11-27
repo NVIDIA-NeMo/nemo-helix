@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import logging
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -30,6 +31,8 @@ from nhx.rl.tasks.training.backends.nemo_rl.sandbox_config import (
 )
 from nhx.rl.tasks.training.datasets.preparation import DatasetFormatError
 
+JOB_UID = "6f1d2c3b-4a59-4e87-9d6c-5b4a39281706"
+
 
 @pytest.fixture
 def job_ctx(tmp_path: Path) -> NHXJobContext:
@@ -43,6 +46,7 @@ def job_ctx(tmp_path: Path) -> NHXJobContext:
         files_url=None,
         storage_path=tmp_path,
         config_path=tmp_path / "config.yaml",
+        job_uid=JOB_UID,
     )
 
 
@@ -192,8 +196,9 @@ def test_compile_grpo_config_sandboxed_paths(
     # Gym resolves relative paths against its CWD (the runtime image's WORKDIR), so a relative
     # entry sends it looking at /opt/nemo-rl/configs/... and it dies with FileNotFoundError.
     assert nemo_gym["config_paths"] == ["/job/environment/configs/verifiers_agent.yaml"]
-    # job_id is a sandbox pod label; without it every job shares one default.
-    assert nemo_gym["job_id"] == "job-123"
+    # job_id is the sandboxes' label, which the jobs controller admits to the training pods and the job's sweeps
+    # match: the job's unique id, because the name job-123 is unique only within its workspace.
+    assert nemo_gym["job_id"] == JOB_UID
     # Full-weight omits lora_cfg entirely rather than emitting enabled=False.
     assert "lora_cfg" not in cfg["policy"]["automodel_cfg"]
 
@@ -1968,3 +1973,27 @@ def test_caller_vllm_kwargs_and_lora_targets_are_kept(
     assert cfg["policy"]["automodel_cfg"]["automodel_kwargs"]["freeze_config"] == {"freeze_vision_tower": False}
     assert cfg["policy"]["automodel_cfg"]["lora_cfg"]["target_modules"] == ["*.q_proj"]
     assert cfg["policy"]["hf_config_overrides"]["num_nextn_predict_layers"] == 0
+
+
+def test_sandboxed_grpo_needs_the_jobs_unique_id(
+    tmp_path: Path, job_ctx: NHXJobContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Labelling the sandboxes by name would let a same-named job in another workspace sweep or reach them."""
+    monkeypatch.setenv("NHX_JOB_STORAGE_PVC_CLAIM", "nhx-job-storage")
+    step, _ = _prepared_step(tmp_path)
+
+    with pytest.raises(ValueError, match="NEMO_JOB_UID"):
+        compile_grpo_config(step, replace(job_ctx, job_uid=None))
+
+
+def test_sandboxed_grpo_mounts_the_jobs_storage_by_name(
+    tmp_path: Path, job_ctx: NHXJobContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Only the sandbox label moves to the unique id; the job's storage is still laid out by its name."""
+    monkeypatch.setenv("NHX_JOB_STORAGE_PVC_CLAIM", "nhx-job-storage")
+    step, _ = _prepared_step(tmp_path)
+
+    sandbox = compile_grpo_config(step, job_ctx)["env"]["nemo_gym"]["sandbox"]
+
+    assert "/job-123/" in f"/{sandbox['workspace_sub_path']}/"
+    assert JOB_UID not in json.dumps(sandbox)

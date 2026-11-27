@@ -23613,8 +23613,8 @@ components:
           type: string
           pattern: ^([a-z0-9]([-a-z0-9.]*[a-z0-9])?/)?[A-Za-z0-9]([-A-Za-z0-9_.]{0,61}[A-Za-z0-9])?$
           title: Job Id Label
-          description: Label key on peer pods whose value must equal the job ID, e.g.
-            'nemo-rl-job-id'.
+          description: Label key on peer pods whose value must equal the job's unique
+            ID (its entity UUID, NEMO_JOB_UID), not its name, e.g. 'nemo-rl-job-id'.
         tcp_ports:
           items:
             type: integer
@@ -23630,7 +23630,7 @@ components:
       - tcp_ports
       title: StepIngressRule
       description: Ingress into the step's pods from peer pods that carry this job's
-        ID under ``job_id_label``.
+        unique ID under ``job_id_label``.
     StepLifecycle:
       properties:
         staleness_timeout_seconds:

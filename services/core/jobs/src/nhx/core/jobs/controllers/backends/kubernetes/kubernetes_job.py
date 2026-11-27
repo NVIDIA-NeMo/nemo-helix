@@ -22,6 +22,7 @@ from nhx.core.jobs.app.constants import (
     JOB_STEP_NAME_LABEL,
     JOB_TYPE_JOB,
     JOB_TYPE_LABEL,
+    JOB_UID_LABEL,
     JOB_USES_PERSISTENT_STORAGE_LABEL,
     JOB_WORKSPACE_ID_LABEL,
     KUBE_JOB_SELECTOR_LABELS,
@@ -274,6 +275,9 @@ class KubernetesJobBackend(JobBackend[ProviderT, KubernetesJobExecutionProfileCo
         common_labels = common_labels_for_step(step)
         common_labels[JOB_EXECUTION_BACKEND_LABEL] = self.BACKEND_NAME
         common_labels[JOB_EXECUTION_PROFILE_LABEL] = self._profile_name
+        # Peers are admitted by this, not the job name (see build_step_network_policy).
+        if step.job_id:
+            common_labels[JOB_UID_LABEL] = step.job_id
         pod_template = create_pod_template_spec(
             step,
             self.namespace,
