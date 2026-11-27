@@ -48,13 +48,35 @@ inputs:
     description: Disable swap and remove /swapfile (~4GB recovered on GitHub-managed runners)
     required: false
     default: "false"
+  min_free_gb:
+    description: >-
+      Skip the purge when / already has at least this many GiB free. Set it to the job's measured peak disk
+      use plus 20 GiB, so a runner image with less free space still gets the purge. Empty always purges.
+    required: false
+    default: ""
 
 runs:
   using: composite
   steps:
     - name: Remove unused tools
       shell: bash
+      env:
+        MIN_FREE_GB: ${{ inputs.min_free_gb }}
       run: |
+        if [ -n "$MIN_FREE_GB" ]; then
+          if ! [[ "$MIN_FREE_GB" =~ ^[0-9]+$ ]]; then
+            echo "::error::min_free_gb must be a whole number of GiB, got '$MIN_FREE_GB'"
+            exit 1
+          fi
+          # MiB rounded down: df rounds a 1G block size up, overstating what is free.
+          free_gb=$(( $(df --block-size=1M --output=avail / | tail -n 1 | tr -d ' ') / 1024 ))
+          if [ "$free_gb" -ge "$MIN_FREE_GB" ]; then
+            echo "Skipping the purge: / has ${free_gb} GiB free, at least the ${MIN_FREE_GB} GiB this job needs."
+            df -h /
+            exit 0
+          fi
+          echo "Purging: / has ${free_gb} GiB free, below the ${MIN_FREE_GB} GiB this job needs."
+        fi
         if [ "${{ inputs.disable_swap }}" = "true" ]; then
           sudo swapoff -a || true
           sudo rm -f /swapfile || true

@@ -1165,6 +1165,9 @@ jobs:
           persist-credentials: false
       - name: Free disk space
         uses: ./.github/actions/free-disk-space
+        with:
+          # Peak disk use is about 6 GiB (measured in PR #4352) plus 20 GiB; a runner starts with about 86 free.
+          min_free_gb: "26"
       - name: Download policy WASM
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -1242,6 +1245,9 @@ jobs:
           persist-credentials: false
       - name: Free disk space
         uses: ./.github/actions/free-disk-space
+        with:
+          # Peak disk use is about 6 GiB (measured in PR #4352) plus 20 GiB; a runner starts with about 86 free.
+          min_free_gb: "26"
       - name: Download policy WASM
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:

@@ -76,6 +76,29 @@ jobs:
           persist-credentials: false
           ref: ${{ inputs.checkout_ref }}
 
+      - name: Choose free disk space threshold
+        id: disk-threshold
+        shell: bash
+        env:
+          FAMILY: ${{ inputs.family }}
+          MAY_WRITE_CACHE: ${{ inputs.write_cache && github.event_name != 'pull_request' }}
+        run: |
+          # Each family's peak disk use, measured in PR #4352, plus 20 GiB. Runs that may write the registry
+          # cache (push, merge queue, manual) also hold the max-mode cache export, so they need more room.
+          # A runner has about 86 GiB free before the purge and 110-115 GiB after it.
+          case "$FAMILY:$MAY_WRITE_CACHE" in
+            api:false) min_free_gb=40 ;;
+            api:true) min_free_gb=64 ;;
+            tasks:false) min_free_gb=60 ;;
+            tasks:true) min_free_gb=122 ;;
+            build-tools:false) min_free_gb=27 ;;
+            build-tools:true) min_free_gb=36 ;;
+            gym-host:false) min_free_gb=44 ;;
+            gym-host:true) min_free_gb=81 ;;
+            *) min_free_gb="" ;;  # Not measured: always purge.
+          esac
+          printf 'min_free_gb=%s\n' "$min_free_gb" >> "$GITHUB_OUTPUT"
+
       - name: Free disk space
         uses: ./.github/actions/free-disk-space
         with:
@@ -85,6 +108,7 @@ jobs:
           remove_ruby: "true"
           remove_swift: "true"
           prune_docker: "true"
+          min_free_gb: ${{ steps.disk-threshold.outputs.min_free_gb }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
