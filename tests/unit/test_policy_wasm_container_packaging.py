@@ -20,7 +20,8 @@ def test_policy_wasm_is_added_before_workspace_install(dockerfile: str) -> None:
     contents = (REPO_ROOT / dockerfile).read_text()
 
     policy_copy = contents.index(f"COPY --from=policy-wasm-artifacts /artifacts/policy.wasm {POLICY_WASM_DESTINATION}")
-    workspace_install = contents.index("uv sync --frozen")
+    # The last sync installs the workspace members; an earlier one may install only third-party packages.
+    workspace_install = contents.rindex("uv sync --frozen")
 
     assert policy_copy < workspace_install
     assert "site-packages/nhx/core/auth/assets/policy.wasm" not in contents
@@ -37,7 +38,8 @@ def test_policy_wasm_is_added_before_workspace_install(dockerfile: str) -> None:
 def test_policy_wasm_is_validated_with_installed_venv_after_workspace_install(dockerfile: str) -> None:
     contents = (REPO_ROOT / dockerfile).read_text()
 
-    workspace_install = contents.index("uv sync --frozen")
+    # The last sync installs the workspace members; an earlier one may install only third-party packages.
+    workspace_install = contents.rindex("uv sync --frozen")
     policy_validation = contents.index(
         "/app/.venv/bin/python -c 'from nhx.core.auth.app.embedded_pdp.policy_wasm "
         "import ensure_embedded_policy_wasm; ensure_embedded_policy_wasm(auto_build=False)'"

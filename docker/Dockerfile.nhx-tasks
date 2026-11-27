@@ -5,10 +5,33 @@
 # NHX CPU Tasks - CPU-only batch task execution
 
 ARG NHX_PYTHON_BASE=nhx-python-base
+ARG NHX_PYTHON_DEPS_BASE=nhx-python-deps-base
 ARG NHX_CPU_TASKS_RUNTIME_BASE=nhx-python-base
 
+# Third-party packages, installed from the lock and the workspace members'
+# pyproject.toml files only, so this stage stays cached until uv.lock or a
+# member's metadata changes. It builds on nhx-python-deps-base, which takes
+# nothing from the build context: on top of nhx-python-base, a registry-cache
+# read re-runs this sync even when the files it copies are unchanged.
+# A new member outside these globs fails the sync.
+FROM ${NHX_PYTHON_DEPS_BASE} AS third-party
+COPY --parents \
+    pyproject.toml uv.lock \
+    packages/*/pyproject.toml \
+    plugins/*/pyproject.toml \
+    plugins/*/examples/*/*/pyproject.toml \
+    services/*/pyproject.toml \
+    services/*/*/pyproject.toml \
+    tools/*/pyproject.toml \
+    ./
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --only-group cpu-tasks --no-editable --no-install-workspace
+
 FROM ${NHX_PYTHON_BASE} AS builder
+RUN rm -rf /app/.venv
+COPY --from=third-party /app/.venv /app/.venv
 COPY --from=nhx-workspace . .
+# Add the workspace members; the third-party packages are already in place.
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --only-group cpu-tasks --no-editable
 # Both OpenShell and Agent Hardener inherit this venv. Keep the release
@@ -45,6 +68,14 @@ RUN --mount=type=cache,target=/root/.cache/uv \
         --python /app/.venv/bin/python \
         --output /app/.source-distributions/nhx-tasks
 RUN mkdir -p /app/.runtime-home/nvs
+# The runtime image copies the third-party venv as its own layer, which stays
+# the same blob while uv.lock is unchanged, then the overlay of what this stage
+# added or changed, then removes what it removed.
+RUN --mount=type=bind,from=third-party,source=/app/.venv,target=/third-party-venv,readonly \
+    --mount=type=bind,source=docker/scripts/split-venv-layers.py,target=/tmp/split-venv-layers.py,readonly \
+    python3 /tmp/split-venv-layers.py split \
+        --base /third-party-venv --venv /app/.venv \
+        --overlay /app/.venv-overlay --removed /app/.venv-removed.txt
 
 # Job steps and plugin tasks may shell out to small POSIX utilities. Keep the
 # runtime distroless while preserving that command surface in one final layer.
@@ -79,12 +110,13 @@ COPY docker/scripts/cve-cleanup.sh /usr/bin/cve-cleanup.sh
 FROM ${NHX_CPU_TASKS_RUNTIME_BASE} AS runtime
 
 COPY --from=cpu-task-runtime-tools /usr/bin/ /usr/bin/
+COPY --chown=1000:1000 --from=third-party /app/.venv /app/.venv
+COPY --chown=1000:1000 --from=builder /app/.venv-overlay/ /app/.venv/
 
 ENV USERNAME=nvs \
     HOME=/home/nvs
 COPY --chown=1000:1000 --from=builder /app/.runtime-home/nvs /home/nvs
 COPY --from=builder /usr/share/nemo-helix/source-distributions/rebuilt-wandb/ /usr/share/nemo-helix/source-distributions/rebuilt-wandb/
-COPY --chown=1000:1000 --from=builder /app/.venv /app/.venv
 COPY --chown=1000:1000 --from=builder /app/.source-distributions/nhx-tasks/ /usr/share/nemo-helix/source-distributions/nhx-tasks/
 COPY --chown=1000:1000 --from=builder /app/plugins/nemo-data-designer/tiktoken-cache /app/tiktoken-cache
 ENV TIKTOKEN_CACHE_DIR=/app/tiktoken-cache
@@ -93,6 +125,9 @@ ENV VIRTUAL_ENV=/app/.venv \
 USER 0
 RUN --mount=type=bind,source=docker/scripts/remove-listed-files.py,target=/tmp/remove-listed-files.py,readonly \
     --mount=type=bind,source=docker/removals/files/base/cve-cleanup-runtime.txt,target=/tmp/file-removals.txt,readonly \
+    --mount=type=bind,source=docker/scripts/split-venv-layers.py,target=/tmp/split-venv-layers.py,readonly \
+    --mount=type=bind,from=builder,source=/app/.venv-removed.txt,target=/tmp/venv-removed.txt,readonly \
+    python /tmp/split-venv-layers.py remove /tmp/venv-removed.txt && \
     sh /bin/cve-cleanup.sh && \
     python /tmp/remove-listed-files.py /tmp/file-removals.txt
 ENTRYPOINT ["/app/.venv/bin/nemo-helix"]
