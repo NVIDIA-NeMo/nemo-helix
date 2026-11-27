@@ -443,10 +443,11 @@ PYTEST_CMD = env PYTHONWARNINGS="ignore::UserWarning:pytest_only.version" $(UV) 
 	--dist $(PYTEST_DIST) --timeout=120 $(PYTEST_VERBOSITY) $(PYTEST_EXTRA)
 
 # PYTEST_COVERAGE=false skips coverage on CI legs whose reports nothing reads.
-PYTEST_COV_OPTS := $(if $(filter false,$(PYTEST_COVERAGE)),,--cov=src --cov=packages \
-	--cov-report json:coverage.json \
-	--cov-report xml:coverage.xml)
-PYTEST_CI_OPTS := $(PYTEST_COV_OPTS) \
+# pytest-cov writes each report after the last test, re-analysing every measured source file, so
+# reports sit on the job's critical path. Recursive (=) so a target can override PYTEST_COV_REPORTS.
+PYTEST_COV_REPORTS = --cov-report json:coverage.json --cov-report xml:coverage.xml
+PYTEST_COV_OPTS = $(if $(filter false,$(PYTEST_COVERAGE)),,--cov=src --cov=packages $(PYTEST_COV_REPORTS))
+PYTEST_CI_OPTS = $(PYTEST_COV_OPTS) \
 	--junitxml=report.xml \
 	--durations=25 \
 	-p no:faulthandler
@@ -479,6 +480,11 @@ test-integration test-integration-ci: PYTEST_MAX_WORKER_RESTART := 0
 # its scope, so each replacement re-collects the suite only to time out again and the job hits its
 # wall clock without naming the test. Fail fast in CI; local runs keep the default restarts.
 test-unit-ci: PYTEST_MAX_WORKER_RESTART := 0
+
+# coverage-comment combines the unit legs' .coverage files and writes its own report, so the legs
+# write none. `--cov-report=` alone makes pytest-cov skip reporting; it still combines and saves
+# .coverage.
+test-unit-ci: PYTEST_COV_REPORTS := --cov-report=
 
 .PHONY: test-unit
 test-unit: ## Run Python unit tests across all packages and services
