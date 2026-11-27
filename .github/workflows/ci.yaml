@@ -1239,13 +1239,15 @@ jobs:
           if-no-files-found: ignore
           path: crash-dumps/
 
+  # The evaluator integration lane runs as three jobs, one per suite, so it takes as long as the
+  # longest suite, not all three in a row. Each suite starts its own platforms, so the jobs share
+  # nothing. All three are required (see ci-status). The repo-wide `python-integration-test` job
+  # stays advisory, so this does not make every team's integration suite blocking. They are
+  # path-filtered and skip on PRs that do not touch the evaluator. Skips count as pass. Keep each
+  # job's `if:` in step with the filters it names.
   evaluator-integration-test:
     name: Evaluator integration tests
-    # Required (see ci-status), unlike the repo-wide `python-integration-test` job, which stays
-    # advisory so this does not make every team's integration suite blocking. Path-filtered, so it
-    # skips -- and skips count as pass -- on PRs that do not touch the evaluator. Also hosts the
-    # opt-in Harbor taskset integration step so its failures gate merges too.
-    needs: [changes, policy-wasm]
+    needs: [changes]
     if: >-
       !cancelled() && (
         github.event_name == 'workflow_dispatch' ||
@@ -1262,13 +1264,29 @@ jobs:
       - name: Free disk space
         uses: ./.github/actions/free-disk-space
         with:
-          # Peak disk use is about 6 GiB (measured in PR #4352) plus 20 GiB; a runner starts with about 86 free.
+          # All three suites together peak at about 6 GiB (measured in PR #4352) plus
+          # 20 GiB. A runner starts with about 86 free.
           min_free_gb: "26"
-      - name: Download policy WASM
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      # The platforms' auth service loads the policy WASM. Each job restores or builds its own,
+      # as the unit-test legs do, instead of waiting for the policy-wasm job's artifact. The key covers
+      # every input of build_policy_wasm.sh and there are no restore-keys, so a hit is always a WASM
+      # built from this commit's policies.
+      - name: Restore policy WASM
+        id: policy-wasm-cache
+        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
-          name: policy-wasm
-          path: services/core/auth/src/nhx/core/auth/assets
+          path: services/core/auth/src/nhx/core/auth/assets/policy.wasm
+          key: policy-wasm-${{ hashFiles('services/core/auth/src/nhx/core/auth/app/policies/**', 'script/build_policy_wasm.sh', 'tools/open-policy-agent/.flox/env/manifest.lock') }}
+      - name: Build policy WASM
+        if: steps.policy-wasm-cache.outputs.cache-hit != 'true'
+        uses: ./.github/actions/build-policy-wasm
+      - name: Save policy WASM
+        # Only this job saves; the other two evaluator jobs would only race it for the same key.
+        if: steps.policy-wasm-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: services/core/auth/src/nhx/core/auth/assets/policy.wasm
+          key: ${{ steps.policy-wasm-cache.outputs.cache-primary-key }}
       - name: Install uv
         uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
         with:
@@ -1282,12 +1300,54 @@ jobs:
           -m integration -n 4 --dist loadgroup -v
         env:
           _TYPER_FORCE_DISABLE_TERMINAL: "1"
-      # test_taskset_run_controller.py tests platforms it does not start, so it skips in the step above.
-      # The script hosts one per auth mode at the URLs below and runs only that file against them; every
-      # test has to run here, and a skip fails the step.
+
+  # test_taskset_run_controller.py tests platforms it does not start, so it skips in
+  # evaluator-integration-test. The script hosts one per auth mode at the URLs below and runs only
+  # that file against them. Every test has to run here, and a skip fails the step.
+  taskset-run-controller-integration-test:
+    name: Taskset-run controller integration tests
+    needs: [changes]
+    # Same condition as evaluator-integration-test, which ran this suite as a step before the split.
+    if: >-
+      !cancelled() && (
+        github.event_name == 'workflow_dispatch' ||
+        needs.changes.outputs.evaluator-integration == 'true' ||
+        needs.changes.outputs.harbor-integration == 'true' ||
+        needs.changes.outputs.deps == 'true'
+      )
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - name: Free disk space
+        uses: ./.github/actions/free-disk-space
+        with:
+          # Same bound as evaluator-integration-test, whose peak covered all three suites.
+          min_free_gb: "26"
+      # Restored or built as in evaluator-integration-test; keep the key in step with it.
+      - name: Restore policy WASM
+        id: policy-wasm-cache
+        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: services/core/auth/src/nhx/core/auth/assets/policy.wasm
+          key: policy-wasm-${{ hashFiles('services/core/auth/src/nhx/core/auth/app/policies/**', 'script/build_policy_wasm.sh', 'tools/open-policy-agent/.flox/env/manifest.lock') }}
+      - name: Build policy WASM
+        if: steps.policy-wasm-cache.outputs.cache-hit != 'true'
+        uses: ./.github/actions/build-policy-wasm
+      - name: Install uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: "3.13"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      # The script starts both platforms with `uv run` at once; sync first so they don't both build the environment.
+      - name: Sync Python environment
+        run: uv sync --frozen
       - name: Run taskset-run controller integration
         id: controller-integration
-        if: ${{ !cancelled() }}
         timeout-minutes: 20
         run: bash .github/scripts/run-taskset-run-controller-integration.sh
         env:
@@ -1306,18 +1366,51 @@ jobs:
           path: |
             ${{ runner.temp }}/controller-platforms/*.log
             ${{ runner.temp }}/controller-platforms/junit.xml
-      # Run separately from xdist: the shared platform fixture binds one port.
-      # Keep opt-in and plugin isolation scoped to this step, not the general suite.
+
+  # Run separately from xdist: the shared platform fixture binds one port.
+  # Keep opt-in and plugin isolation scoped to this job, not the general suite.
+  harbor-taskset-integration-test:
+    name: Harbor taskset integration tests
+    needs: [changes]
+    # Directory/file patterns live in .github/actions/changes/action.yaml.
+    # Dependency changes can also affect Harbor; manual runs always exercise it.
+    # Narrower than evaluator-integration-test's condition. It is the condition this suite had as a step there.
+    if: >-
+      !cancelled() && (
+        github.event_name == 'workflow_dispatch' ||
+        needs.changes.outputs.deps == 'true' ||
+        needs.changes.outputs.harbor-integration == 'true'
+      )
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - name: Free disk space
+        uses: ./.github/actions/free-disk-space
+        with:
+          # Same bound as evaluator-integration-test, whose peak covered all three suites.
+          min_free_gb: "26"
+      # Restored or built as in evaluator-integration-test; keep the key in step with it.
+      - name: Restore policy WASM
+        id: policy-wasm-cache
+        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: services/core/auth/src/nhx/core/auth/assets/policy.wasm
+          key: policy-wasm-${{ hashFiles('services/core/auth/src/nhx/core/auth/app/policies/**', 'script/build_policy_wasm.sh', 'tools/open-policy-agent/.flox/env/manifest.lock') }}
+      - name: Build policy WASM
+        if: steps.policy-wasm-cache.outputs.cache-hit != 'true'
+        uses: ./.github/actions/build-policy-wasm
+      - name: Install uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: "3.13"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
       - name: Run Harbor taskset integration
         id: harbor-integration
-        # Directory/file patterns live in .github/actions/changes/action.yaml.
-        # Dependency changes can also affect Harbor; manual runs always exercise it.
-        if: >
-          !cancelled() && (
-            github.event_name == 'workflow_dispatch' ||
-            needs.changes.outputs.deps == 'true' ||
-            needs.changes.outputs.harbor-integration == 'true'
-          )
         timeout-minutes: 10
         run: |
           uv sync --frozen --package nemohelix --package nemo-evals-plugin --extra harbor
@@ -2100,6 +2193,8 @@ jobs:
       - helm-chart-verifier
       - lint
       - evaluator-integration-test
+      - taskset-run-controller-integration-test
+      - harbor-taskset-integration-test
       - ngc-metadata-test
       - nightly-taskset-runs-report-test
       - test-gates
