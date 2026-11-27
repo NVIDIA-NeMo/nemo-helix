@@ -604,6 +604,10 @@ target "nhx-rl-training-smoke-test" {
 }
 
 # Base images for consolidated containers
+#
+# Image targets bring this base in as `target:nhx-python-base`, so it writes the
+# same registry cache as nhx-python-base-builder. Without it, every CI build
+# reruns the base's apt-get upgrade.
 target "nhx-python-base" {
   target     = "nhx-python-base-builder"
   context    = "."
@@ -611,6 +615,7 @@ target "nhx-python-base" {
   args = {
     NHX_PYTHON_IMAGE = "${NHX_PYTHON_IMAGE}"
   }
+  cache-to   = maybe_registry_cache_to("nhx-python-base")
   cache-from = maybe_registry_cache_from("nhx-python-base")
   platforms  = get_platforms()
 }
