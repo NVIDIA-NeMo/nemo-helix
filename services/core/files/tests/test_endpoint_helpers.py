@@ -3,18 +3,27 @@
 
 """Tests for endpoint helper functions."""
 
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import anyio
+import httpx
+import jwt
 import pytest
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
+from nemo_helix_plugin.client.auth import StaticToken
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import NotFoundError as ClientNotFoundError
 from nemo_helix_plugin.secrets.client import AsyncSecretsClient
 from nhx.common.api.common import SecretRef
 from nhx.common.auth import AuthClient, Principal
+from nhx.common.auth.headers import TRUSTED_IDENTITY_HEADERS
+from nhx.common.auth.workload_tokens import resolve_workload_access_token
 from nhx.common.config import AuthConfig
+from nhx.common.config.base import OIDCConfig, OIDCWorkloadConfig, TokenSigningConfig
 from nhx.common.observability import MARK_INTERNAL_REQUEST_HEADERS
-from nhx.common.secrets.exceptions import SecretNotFoundError
+from nhx.common.secrets.exceptions import SecretAccessDeniedError, SecretNotFoundError
 from nhx.core.files.api.endpoint_helpers import (
     CacheContext,
     get_cache_status_for_files,
@@ -227,6 +236,115 @@ async def test_resolve_storage_secrets_for_user_delegates_effective_principal_cl
     # Caller-only claims inherited from the request-scoped client are cleared, not forwarded.
     assert captured_headers["X-NHX-Principal-Groups"] == ""
     assert captured_headers["X-NHX-Principal-Email"] == ""
+
+
+@pytest.mark.parametrize("delegated", [False, True])
+@pytest.mark.parametrize("status", [200, 403, 404])
+async def test_storage_secret_lookup_uses_signed_creator_delegation(
+    tmp_path: Path, delegated: bool, status: int
+) -> None:
+    private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    key_path = tmp_path / "signing.pem"
+    key_path.write_bytes(
+        private_key.private_bytes(
+            serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()
+        )
+    )
+    auth_config = AuthConfig(
+        enabled=True,
+        token_signing=TokenSigningConfig(
+            issuer="https://platform.test/apis/auth", key_id="test-files", private_key_file=str(key_path)
+        ),
+        oidc=OIDCConfig(
+            enabled=True,
+            audience="interactive-client",
+            workload=OIDCWorkloadConfig(
+                client_id="test-workload", audience="helix", scope="platform:read platform:write"
+            ),
+        ),
+    )
+    creator = Principal(
+        id="creator@example.com",
+        email="creator@example.com",
+        groups=["workspace-editors"],
+        authz_aliases=["legacy-creator"],
+    )
+    principal = (
+        Principal(
+            id="service:models",
+            groups=["system:serviceaccounts"],
+            on_behalf_of=creator.id,
+            on_behalf_of_email=creator.email,
+            on_behalf_of_groups=creator.groups,
+            on_behalf_of_authz_aliases=creator.authz_aliases,
+        )
+        if delegated
+        else creator
+    )
+    requests: list[httpx.Request] = []
+
+    async def access_secret(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        assert request.url.path == "/apis/secrets/v2/workspaces/shared/secrets/hf-token/access"
+        # The receiving middleware rejects even empty trusted identity headers.
+        assert not TRUSTED_IDENTITY_HEADERS.intersection(request.headers)
+        token = request.headers["authorization"].removeprefix("Bearer ")
+        claims = jwt.decode(
+            token,
+            private_key.public_key(),
+            algorithms=["RS256"],
+            audience="helix",
+            issuer="https://platform.test/apis/auth",
+        )
+        assert claims["sub"] == creator.id
+        assert claims["email"] == creator.email
+        assert claims["groups"] == "workspace-editors"
+        assert claims["act"] == {"sub": "service:files"}
+        assert claims["scope"] == "platform:read platform:write"
+        resolved = await resolve_workload_access_token(auth_config, token)
+        assert resolved is not None
+        subject_aliases = resolved.principal.on_behalf_of_authz_aliases
+        assert set(creator.authz_aliases).issubset(subject_aliases)
+        # Only the legacy alias has a grant to this secret, not the subject or email.
+        secret_grants = {"legacy-creator": {"shared/hf-token"}}
+        permitted = any("shared/hf-token" in secret_grants.get(alias, set()) for alias in subject_aliases)
+        assert request.headers["traceparent"] == "preserved-trace"
+        for header, value in MARK_INTERNAL_REQUEST_HEADERS.items():
+            assert request.headers[header] == value
+        return httpx.Response(
+            status if permitted else 403,
+            json={"name": "hf-token", "workspace": "shared", "value": "hf-token"}
+            if status == 200
+            else {"detail": "denied"},
+        )
+
+    storage = HuggingfaceStorageConfig(repo_id="org/repo", token_secret=SecretRef(root="shared/hf-token"))
+    async with (
+        httpx.AsyncClient(transport=httpx.MockTransport(access_secret)) as transport,
+        AsyncNemoClient(
+            base_url="https://platform.test",
+            auth=StaticToken("caller-token"),
+            default_headers={
+                "x-NHX-principal-ID": "service:models",
+                "X-NHX-Scopes": "admin",
+                "authorization": "Bearer stale-token",
+                "traceparent": "preserved-trace",
+            },
+            http_client=transport,
+        ) as client,
+    ):
+        auth_client = AuthClient(config=auth_config, principal=principal)
+        if status == 200:
+            assert await resolve_storage_secrets_for_user(storage, "default", client, auth_client) == {
+                "token": "hf-token"
+            }
+        else:
+            error = SecretAccessDeniedError if status == 403 else SecretNotFoundError
+            with pytest.raises(error, match="shared/hf-token"):
+                await resolve_storage_secrets_for_user(storage, "default", client, auth_client)
+        assert not transport.is_closed
+        assert client.default_headers["authorization"] == "Bearer stale-token"
+    assert len(requests) == 1
 
 
 # Tests for get_cache_status_for_files

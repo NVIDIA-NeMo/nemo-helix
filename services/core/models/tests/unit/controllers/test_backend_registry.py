@@ -29,7 +29,7 @@ def test_backend_registry_from_config(mock_client, sample_backend_configs):
     registry = BackendRegistry.from_config(
         client=mock_client,
         backend_configs=sample_backend_configs,
-        huggingface_model_puller="nvcr.io/nvidia/nemo-microservices/nds-v2-huggingface-cli:25.10",
+        huggingface_model_puller="registry/nhx-api:release",
     )
 
     assert isinstance(registry, BackendRegistry)
@@ -41,7 +41,7 @@ def test_backend_registry_get_default_backend(mock_client, sample_backend_config
     registry = BackendRegistry.from_config(
         client=mock_client,
         backend_configs=sample_backend_configs,
-        huggingface_model_puller="nvcr.io/nvidia/nemo-microservices/nds-v2-huggingface-cli:25.10",
+        huggingface_model_puller="registry/nhx-api:release",
     )
 
     assert registry.get_backend() is not None
@@ -52,7 +52,7 @@ def test_backend_registry_get_backend_not_found(mock_client, sample_backend_conf
     registry = BackendRegistry.from_config(
         client=mock_client,
         backend_configs=sample_backend_configs,
-        huggingface_model_puller="nvcr.io/nvidia/nemo-microservices/nds-v2-huggingface-cli:25.10",
+        huggingface_model_puller="registry/nhx-api:release",
     )
 
     with pytest.raises(KeyError, match="Backend 'unknown' not found"):
@@ -64,7 +64,7 @@ def test_backend_registry_list_backends(mock_client, sample_backend_configs):
     registry = BackendRegistry.from_config(
         client=mock_client,
         backend_configs=sample_backend_configs,
-        huggingface_model_puller="nvcr.io/nvidia/nemo-microservices/nds-v2-huggingface-cli:25.10",
+        huggingface_model_puller="registry/nhx-api:release",
     )
 
     backends = registry.list_backends()
@@ -77,7 +77,7 @@ def test_backend_registry_empty_config_raises_error(mock_client):
         BackendRegistry.from_config(
             client=mock_client,
             backend_configs={},
-            huggingface_model_puller="nvcr.io/nvidia/nemo-microservices/nds-v2-huggingface-cli:25.10",
+            huggingface_model_puller="registry/nhx-api:release",
         )
 
 
@@ -95,7 +95,7 @@ def test_backend_registry_unknown_backend_type(mock_client):
         BackendRegistry.from_config(
             client=mock_client,
             backend_configs=bad_config,
-            huggingface_model_puller="nvcr.io/nvidia/nemo-microservices/nds-v2-huggingface-cli:25.10",
+            huggingface_model_puller="registry/nhx-api:release",
             available_backends={},
         )
 
@@ -117,7 +117,7 @@ def test_backend_config_from_yaml_to_registry(mock_client):
     registry = BackendRegistry.from_config(
         client=mock_client,
         backend_configs=parsed_configs,
-        huggingface_model_puller="nvcr.io/nvidia/nemo-microservices/nds-v2-huggingface-cli:25.10",
+        huggingface_model_puller="registry/nhx-api:release",
     )
 
     assert registry.list_backends() == ["deployments_plugin"]
@@ -133,7 +133,7 @@ def test_backend_registry_no_enabled_backends_raises_error(mock_client):
         BackendRegistry.from_config(
             client=mock_client,
             backend_configs=config_with_no_enabled,
-            huggingface_model_puller="nvcr.io/nvidia/nemo-microservices/nds-v2-huggingface-cli:25.10",
+            huggingface_model_puller="registry/nhx-api:release",
         )
 
 
@@ -148,7 +148,7 @@ def test_backend_registry_multiple_enabled_backends_raises_error(mock_client):
         BackendRegistry.from_config(
             client=mock_client,
             backend_configs=config_with_multiple_enabled,
-            huggingface_model_puller="nvcr.io/nvidia/nemo-microservices/nds-v2-huggingface-cli:25.10",
+            huggingface_model_puller="registry/nhx-api:release",
         )
 
 

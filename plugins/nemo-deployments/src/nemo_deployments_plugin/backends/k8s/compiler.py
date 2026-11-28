@@ -17,7 +17,7 @@ from typing import Any
 
 from kubernetes.client.models import V1EnvVar, V1Volume
 from kubernetes.client.rest import ApiException
-from nemo_deployments_plugin.auth_proxy import build_auth_proxy_container
+from nemo_deployments_plugin.auth_proxy import build_auth_proxy_container, is_auth_proxy_container
 from nemo_deployments_plugin.backends.k8s.client import k8s_client_module
 from nemo_deployments_plugin.backends.k8s.status import resource_labels_match
 from nemo_deployments_plugin.backends.k8s.workload_identity import service_account_name as workload_service_account_name
@@ -43,6 +43,7 @@ from nemo_deployments_plugin.entities import (
     VolumeMount,
 )
 from nemo_deployments_plugin.types import RestartPolicy
+from nemo_helix_plugin.auth import AuthContext
 from nemo_helix_plugin.auth.workload_identity import (
     WORKLOAD_IDENTITY_TOKEN_FILE_PATH,
     WORKLOAD_IDENTITY_VOLUME_NAME,
@@ -430,6 +431,10 @@ def build_container(
     if include_probes:
         kwargs["liveness_probe"] = _build_probe(container.liveness_probe)
         kwargs["readiness_probe"] = _build_probe(container.readiness_probe)
+        if is_auth_proxy_container(container):
+            # Native sidecar readiness does not delay the main container. Wait
+            # for the loopback proxy to listen before starting its clients.
+            kwargs["startup_probe"] = _build_probe(container.readiness_probe)
     if container.restart_policy == NATIVE_SIDECAR_RESTART_POLICY:
         kwargs["restart_policy"] = NATIVE_SIDECAR_RESTART_POLICY
     return k8s.client.V1Container(**{key: value for key, value in kwargs.items() if value is not None})
@@ -573,6 +578,7 @@ def compile_workload(
     executor_image_pull_secrets: list[ImagePullSecret] | None = None,
     executor_defaults: ExecutorK8sDefaults | None = None,
     secret_env: dict[str, str] | None = None,
+    auth_context: AuthContext | None = None,
 ) -> CompiledWorkload:
     """Compile pod spec kwargs and optional ConfigMap/Secret for a Job or Deployment.
 
@@ -619,7 +625,7 @@ def compile_workload(
     # container. It receives workload identity when enabled because the proxy is
     # the component that forwards bearer-authenticated platform calls upstream,
     # but it deliberately does NOT receive the workload's secret envFrom.
-    auth_proxy = build_auth_proxy_container(config)
+    auth_proxy = build_auth_proxy_container(config, auth_context=auth_context)
     if auth_proxy is not None:
         init_containers.append(
             build_container(

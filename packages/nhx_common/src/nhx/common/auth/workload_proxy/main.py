@@ -30,6 +30,11 @@ as its creator). The delegated identity is baked in at deploy time and is *not*
 taken from the incoming request — the inbound principal/OBO headers are stripped
 so a co-located workload cannot spoof a different identity.
 
+Managed deployments also set ``NHX_AUTH_PROXY_AUTH_CONTEXT`` from the creator
+context captured by the deployments API. The proxy preserves that effective
+creator's groups, email, stable account ID, and authorization aliases. These
+claims come from the captured context, never the colocated workload's request.
+
 Started via ``nemo services run --sidecars auth-proxy``.
 """
 
@@ -52,7 +57,7 @@ from nemo_helix_plugin.client.constants import (
     is_workload_identity_token_file_set,
 )
 from nemo_helix_plugin.client.oidc_factory import resolve_workload_exchange_provider
-from nhx.common.auth import Principal
+from nhx.common.auth import AuthContext, Principal
 from nhx.common.auth.principal_identifier import normalize_service_principal_identifier
 from nhx.common.controller import Controller, ControllerManager, Loop, TimedLoopWaiter
 from nhx.common.platform_endpoint import parse_platform_endpoint, require_authorization_header_endpoint
@@ -69,6 +74,7 @@ AUTH_PROXY_PRINCIPAL_ENVVAR = "NHX_AUTH_PROXY_PRINCIPAL"
 # creator). When set, the service principal acts on behalf of this identity so
 # the platform scopes access to what that principal can reach.
 AUTH_PROXY_ON_BEHALF_OF_ENVVAR = "NHX_AUTH_PROXY_ON_BEHALF_OF"
+AUTH_PROXY_AUTH_CONTEXT_ENVVAR = "NHX_AUTH_PROXY_AUTH_CONTEXT"
 AUTH_PROXY_ALLOW_NON_LOOPBACK_ENVVAR = "NHX_AUTH_PROXY_ALLOW_NON_LOOPBACK"
 DEFAULT_AUTH_PROXY_HOST = "127.0.0.1"
 DEFAULT_AUTH_PROXY_PORT = 8090
@@ -104,6 +110,7 @@ def build_app(
     base_url: str,
     principal: str | None = None,
     on_behalf_of: str | None = None,
+    auth_context: AuthContext | None = None,
     auth: httpx.Auth | None = None,
 ) -> FastAPI:
     """Build a forwarder with either service identity or transport authentication.
@@ -119,13 +126,16 @@ def build_app(
     principal so the platform scopes access to what it can reach rather than the
     service principal's full ServiceSystem reach.
 
+    *auth_context* is the captured creator context supplied by the deployment
+    backend. Its effective identity must match *on_behalf_of*.
+
     With explicit *auth*, the transport resolves credentials for each request.
     No service identity headers are added.
     """
     if auth is not None:
         if principal is not None:
             raise ValueError("Provide exactly one of principal or auth")
-        if on_behalf_of is not None:
+        if on_behalf_of is not None or auth_context is not None:
             raise ValueError("on_behalf_of requires principal authentication")
         _require_auth_upstream(base_url)
         return build_auth_proxy_app(base_url=base_url, auth=auth)
@@ -138,11 +148,17 @@ def build_app(
         raise ValueError("Provide exactly one of principal or auth")
 
     principal_id = normalize_service_principal_identifier(principal)
+    creator = auth_context.to_principal().effective_principal if auth_context is not None else None
+    if creator is not None and on_behalf_of != creator.id:
+        raise ValueError("on_behalf_of does not match captured creator auth context")
     principal_context = Principal(
         id=principal_id,
         authz_aliases=[principal_id],
         on_behalf_of=on_behalf_of,
-        on_behalf_of_authz_aliases=[on_behalf_of] if on_behalf_of else [],
+        on_behalf_of_groups=creator.groups if creator else None,
+        on_behalf_of_email=creator.email if creator else None,
+        on_behalf_of_account_id=creator.account_id if creator else None,
+        on_behalf_of_authz_aliases=creator.authz_aliases if creator else ([on_behalf_of] if on_behalf_of else []),
     )
     return build_auth_proxy_app(base_url=base_url, headers=principal_context.get_headers())
 
@@ -275,6 +291,8 @@ def _build_server() -> tuple[str, str, str | None, str, int, uvicorn.Server]:
     if not principal:
         raise RuntimeError(f"{AUTH_PROXY_PRINCIPAL_ENVVAR} is required for the auth-proxy sidecar")
     on_behalf_of = os.environ.get(AUTH_PROXY_ON_BEHALF_OF_ENVVAR) or None
+    raw_auth_context = os.environ.get(AUTH_PROXY_AUTH_CONTEXT_ENVVAR)
+    auth_context = AuthContext.model_validate_json(raw_auth_context) if raw_auth_context else None
     host = os.environ.get(AUTH_PROXY_HOST_ENVVAR, DEFAULT_AUTH_PROXY_HOST)
     if not _is_loopback_host(host) and os.environ.get(AUTH_PROXY_ALLOW_NON_LOOPBACK_ENVVAR, "").lower() not in {
         "1",
@@ -286,7 +304,7 @@ def _build_server() -> tuple[str, str, str | None, str, int, uvicorn.Server]:
             f"{AUTH_PROXY_ALLOW_NON_LOOPBACK_ENVVAR}=true only if external exposure is intentional"
         )
     port = int(os.environ.get(AUTH_PROXY_PORT_ENVVAR, str(DEFAULT_AUTH_PROXY_PORT)))
-    app = build_app(base_url=base_url, principal=principal, on_behalf_of=on_behalf_of)
+    app = build_app(base_url=base_url, principal=principal, on_behalf_of=on_behalf_of, auth_context=auth_context)
     config = uvicorn.Config(app, host=host, port=port, log_level="info", access_log=False)
     return base_url, principal, on_behalf_of, host, port, Server(config)
 

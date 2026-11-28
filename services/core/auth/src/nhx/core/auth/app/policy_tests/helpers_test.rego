@@ -67,24 +67,24 @@ test_normalize_endpoint if {
     }
     
     # Test pattern matching for models
-    common.normalize_endpoint("/apis/models/v2/workspaces/test-ns/models/model-name") == "/apis/models/v2/workspaces/{workspace}/models/{name}"
+    common.normalize_endpoint("/apis/models/v2/workspaces/test-ns/models/model-name", "GET") == "/apis/models/v2/workspaces/{workspace}/models/{name}"
         with data.authz.endpoints as mock_endpoints
     
     # Test pattern matching for filesets
-    common.normalize_endpoint("/apis/files/v2/workspaces/my-ns/filesets/dataset-123") == "/apis/files/v2/workspaces/{workspace}/filesets/{name}"
+    common.normalize_endpoint("/apis/files/v2/workspaces/my-ns/filesets/dataset-123", "GET") == "/apis/files/v2/workspaces/{workspace}/filesets/{name}"
         with data.authz.endpoints as mock_endpoints
     
     # Test pattern matching for workspace members
-    common.normalize_endpoint("/apis/entities/v2/workspaces/789/members") == "/apis/entities/v2/workspaces/{workspace}/members"
+    common.normalize_endpoint("/apis/entities/v2/workspaces/789/members", "GET") == "/apis/entities/v2/workspaces/{workspace}/members"
         with data.authz.endpoints as mock_endpoints
     
     # Test exact matches
-    common.normalize_endpoint("/apis/models/v2/workspaces/ws/models") == "/apis/models/v2/workspaces/{workspace}/models"
+    common.normalize_endpoint("/apis/models/v2/workspaces/ws/models", "GET") == "/apis/models/v2/workspaces/{workspace}/models"
         with data.authz.endpoints as mock_endpoints
-    common.normalize_endpoint("/apis/entities/v2/workspaces") == "/apis/entities/v2/workspaces"
+    common.normalize_endpoint("/apis/entities/v2/workspaces", "GET") == "/apis/entities/v2/workspaces"
         with data.authz.endpoints as mock_endpoints
     
     # Test filesets collection pattern
-    common.normalize_endpoint("/apis/files/v2/workspaces/test-ns/filesets") == "/apis/files/v2/workspaces/{workspace}/filesets"
+    common.normalize_endpoint("/apis/files/v2/workspaces/test-ns/filesets", "GET") == "/apis/files/v2/workspaces/{workspace}/filesets"
         with data.authz.endpoints as mock_endpoints
 }

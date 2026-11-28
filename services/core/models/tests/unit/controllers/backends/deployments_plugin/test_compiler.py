@@ -11,12 +11,15 @@ from unittest.mock import MagicMock, patch
 import pytest
 import yaml
 from nemo_deployments_plugin.entities import Container, SecretRef
-from nemo_helix_plugin.auth import AuthContext
-from nemo_helix_plugin.models.types import K8sNIMOperatorConfig, ToolCallConfig
+from nemo_deployments_plugin.schema import CreateDeploymentConfigRequest
+from nemo_helix_plugin.models.types import AuthContext, K8sNIMOperatorConfig, ToolCallConfig
 from nhx.common.config import Runtime
 from nhx.core.models.app import ModelWeightsType
 from nhx.core.models.controllers.backends.common import DeploymentConfigView
-from nhx.core.models.controllers.backends.deployments_plugin.compiler import _busybox_image, compile_model_deployment
+from nhx.core.models.controllers.backends.deployments_plugin.compiler import (
+    _busybox_image,
+    compile_model_deployment,
+)
 from nhx.core.models.controllers.backends.deployments_plugin.config import DeploymentsPluginConfig
 from nhx.core.models.controllers.backends.deployments_plugin.nim_compiler import (
     compile_nim_server_env,
@@ -155,9 +158,21 @@ def test_vllm_server_command_image_args_and_gpu() -> None:
     # HF cache bookkeeping must land on the mounted PVC, not ephemeral container
     # storage, so large checkpoints don't overflow $HOME/.cache with ENOSPC.
     assert puller_env["HF_HOME"] == MODEL_STORE_PATH
-    assert puller.command == ["hf"]
-    assert puller.args == ["download", "org/model", "--local-dir", "/model-store"]
+    assert puller.command == ["python3", "-m", "nhx.core.models.tasks.weight_puller"]
+    assert puller.args == ["--repo-id", "org/model", "--local-dir", "/model-store"]
     assert "nvidia.com/gpu" not in puller.resources.limits
+
+
+def test_weight_puller_preserves_image_override_and_literal_revision() -> None:
+    resolved = replace(
+        _resolved("vllm"), huggingface_model_puller="example/helix-puller:custom", model_revision="refs/pr/7"
+    )
+    compiled = compile_model_deployment(resolved, DeploymentsPluginConfig())
+    assert compiled.puller_config is not None
+    puller = compiled.puller_config.containers[0]
+    assert puller.image == "example/helix-puller:custom"
+    assert puller.command == ["python3", "-m", "nhx.core.models.tasks.weight_puller"]
+    assert puller.args[-2:] == ["--revision", "refs/pr/7"]
 
 
 def test_nim_defaults_to_the_model_free_nim_image() -> None:
@@ -887,6 +902,64 @@ def test_compile_model_deployment_adds_workload_identity_when_auth_context_prese
     assert compiled.puller_config.workload_identity.token_audience == "model-audience"
     assert compiled.server_config.workload_identity.workload_id == "my-dep/v3"
     assert compiled.server_config.workload_identity.token_audience == "model-audience"
+
+
+@pytest.mark.parametrize("engine", ["vllm", "nim", "generic"])
+@pytest.mark.parametrize("runtime", [Runtime.KUBERNETES, Runtime.DOCKER])
+@pytest.mark.parametrize("exchange", [False, True])
+def test_authenticated_weight_puller_uses_creator_scoped_proxy(
+    monkeypatch: pytest.MonkeyPatch, engine: str, runtime: Runtime, exchange: bool
+) -> None:
+    resolved = _resolved(engine, runtime=runtime)
+    if engine == "generic":
+        resolved.view.image_name = "custom/server"
+    resolved.deployment.auth_context = AuthContext(principal_id="service:models", principal_on_behalf_of="user:alice")
+    resolved = replace(resolved, files_hf_url="https://platform.test/apis/files/v2/hf")
+    monkeypatch.setattr("nemo_deployments_plugin.deployment_auth.platform_auth_enabled", lambda: True)
+    monkeypatch.setattr(
+        "nemo_deployments_plugin.deployment_auth.is_workload_identity_token_exchange_enabled", lambda: exchange
+    )
+    monkeypatch.setattr("nemo_deployments_plugin.deployment_auth.auth_proxy_port", lambda: 8090)
+    monkeypatch.setattr(
+        "nhx.core.models.controllers.backends.deployments_plugin.compiler.is_workload_identity_token_exchange_enabled",
+        lambda: exchange,
+    )
+
+    compiled = compile_model_deployment(resolved, DeploymentsPluginConfig())
+
+    puller = compiled.puller_config
+    assert puller is not None
+    env = {item.name: item.value for item in puller.containers[0].env}
+    assert env["HF_ENDPOINT"] == "http://127.0.0.1:8090/apis/files/v2/hf"
+    if runtime == Runtime.DOCKER:
+        assert puller.containers[0].args[-2:] == ["--proxy-health-url", "http://127.0.0.1:8090/healthz"]
+    else:
+        assert "--proxy-health-url" not in puller.containers[0].args
+    assert "HF_TOKEN" not in env
+    assert puller.auth_proxy_sidecar is True
+    assert puller.auth_proxy_sidecar_identity == "models"
+    assert puller.auth_proxy_sidecar_on_behalf_of == (None if exchange else "user:alice")
+    assert (puller.workload_identity is not None) is exchange
+    request = deployment_config_create_request(puller)
+    assert request.auth_proxy_sidecar is True
+    payload = request.model_dump(by_alias=True, exclude_none=True)
+    # The public API chooses the service identity. Delegation comes from the
+    # creator context captured when the controller creates the Deployment.
+    assert "authProxySidecarIdentity" not in payload
+    assert "authProxySidecarOnBehalfOf" not in payload
+    server_request = CreateDeploymentConfigRequest.model_validate(payload)
+    assert server_request.auth_proxy_sidecar is True
+    assert (server_request.workload_identity is not None) is exchange
+
+
+@pytest.mark.parametrize("exchange", [False, True])
+def test_weight_puller_refuses_missing_creator(monkeypatch: pytest.MonkeyPatch, exchange: bool) -> None:
+    monkeypatch.setattr("nemo_deployments_plugin.deployment_auth.platform_auth_enabled", lambda: True)
+    monkeypatch.setattr(
+        "nemo_deployments_plugin.deployment_auth.is_workload_identity_token_exchange_enabled", lambda: exchange
+    )
+    with pytest.raises(ValueError, match="requires creator auth context"):
+        compile_model_deployment(_resolved("vllm"), DeploymentsPluginConfig())
 
 
 @pytest.mark.parametrize("engine", ["vllm", "nim"])

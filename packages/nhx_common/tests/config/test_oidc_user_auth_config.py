@@ -1,9 +1,12 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+from pathlib import Path
+
 import pytest
+import yaml
 from nemo_helix_plugin.config import NemoHelixConfig, Runtime
-from nhx.common.config import AuthConfig
+from nhx.common.config import AuthConfig, Configuration
 from nhx.common.config.base import (
     OIDCConfidentialClientConfig,
     OIDCConfig,
@@ -133,6 +136,45 @@ def test_oidc_workload_profile_presence_enables_workload_configuration() -> None
     assert config.workload.audience == "nemo-helix"
 
 
+@pytest.mark.parametrize("enabled", [True, False])
+def test_oidc_workload_accepts_deprecated_token_review_toggle(enabled: bool) -> None:
+    with pytest.warns(FutureWarning, match="false no longer disables TokenReview"):
+        config = OIDCWorkloadConfig.model_validate(
+            {"client_id": "nemo-workload", "kubernetes_token_review_enabled": enabled}
+        )
+    assert config.client_id == "nemo-workload"
+    assert "kubernetes_token_review_enabled" not in config.model_dump()
+    assert "kubernetes_token_review_enabled" not in config.model_json_schema()["properties"]
+
+
+@pytest.mark.parametrize("enabled", [None, True, False])
+def test_retained_helm_workload_config_loads_from_platform_yaml(tmp_path: Path, enabled: bool | None) -> None:
+    workload: dict[str, object] = {
+        "client_id": "nemo-workload",
+        "token_private_key_file": str(tmp_path / "workload.pem"),
+    }
+    if enabled is not None:
+        workload["kubernetes_token_review_enabled"] = enabled
+    helm_values = {"platformConfig": {"auth": {"enabled": True, "oidc": {"workload": workload}}}}
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(yaml.safe_dump(helm_values["platformConfig"]))
+    settings = Configuration.get_global_settings_from_file(str(config_path))
+    if enabled is None:
+        config = Configuration.global_settings_to_service_config(settings, AuthConfig)
+    else:
+        with pytest.warns(FutureWarning, match="deprecated and ignored"):
+            config = Configuration.global_settings_to_service_config(settings, AuthConfig)
+    assert config.enabled is True
+    assert config.oidc.workload is not None
+    assert config.oidc.workload.client_id == "nemo-workload"
+    assert "kubernetes_token_review_enabled" not in config.oidc.workload.model_dump()
+
+
+def test_oidc_workload_still_rejects_unknown_settings() -> None:
+    with pytest.raises(ValidationError, match="extra_forbidden"):
+        OIDCWorkloadConfig.model_validate({"client_id": "nemo-workload", "unknown_setting": True})
+
+
 @pytest.mark.parametrize(
     ("removed_field", "replacement"),
     [
@@ -140,6 +182,7 @@ def test_oidc_workload_profile_presence_enables_workload_configuration() -> None
         ("client_authentication", "public_client or confidential_client"),
         ("session_encryption_key_env_var", "server_sessions.encryption_key_env_var"),
         ("workload_client_id", "workload.client_id"),
+        ("workload_kubernetes_token_review_enabled", "workload (Kubernetes TokenReview is automatic)"),
     ],
 )
 def test_oidc_removed_flat_fields_have_exact_migration_error(removed_field: str, replacement: str) -> None:

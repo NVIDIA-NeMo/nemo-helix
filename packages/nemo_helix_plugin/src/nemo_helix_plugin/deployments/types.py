@@ -345,6 +345,7 @@ class CreateDeploymentConfigRequest(_AliasModel):
     labels: dict[str, str] = Field(default_factory=dict)
     backend_config: DeploymentBackendConfig = Field(default_factory=DeploymentBackendConfig, alias="backendConfig")
     shm_size: str | None = Field(default="8Gi", alias="shmSize")
+    auth_proxy_sidecar: bool = Field(default=False, alias="authProxySidecar")
     workload_identity: WorkloadIdentitySpec | None = Field(default=None, alias="workloadIdentity")
 
 

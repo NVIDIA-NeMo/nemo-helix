@@ -69,7 +69,7 @@ has_identity_permissions(principal, workspace, required_permissions, actor_side)
 # Returns undefined (not []) when the matched endpoint has no `callers` key, so
 # callers can treat absence as the default (PRINCIPAL) semantics — no new restriction.
 endpoint_callers(path, method) := callers if {
-	endpoint := normalize_endpoint(path)
+	endpoint := normalize_endpoint(path, method)
 	method_lower := lower(method)
 	callers := data.authz.endpoints[endpoint][method_lower].callers
 }
@@ -78,7 +78,7 @@ endpoint_callers(path, method) := callers if {
 # signal emitted for unruled or invalid plugin routes. Undefined (not false) otherwise so it
 # only fires where the marker is present.
 endpoint_denied(path, method) if {
-	endpoint := normalize_endpoint(path)
+	endpoint := normalize_endpoint(path, method)
 	data.authz.endpoints[endpoint][lower(method)].deny == true
 }
 
@@ -487,6 +487,15 @@ path_matches_pattern(path, pattern) if {
 		segment_matches(path_parts[trailing_start + j], suffix_parts[j])
 	}
 } else if {
+	# An explicit FastAPI path converter consumes one or more trailing segments.
+	endswith(pattern, "/{path:path}")
+	prefix_parts := split(trim_suffix(pattern, "/{path:path}"), "/")
+	path_parts := split(path, "/")
+	count(path_parts) > count(prefix_parts)
+	every i in numbers.range(0, count(prefix_parts) - 1) {
+		segment_matches(path_parts[i], prefix_parts[i])
+	}
+} else if {
 	# Standard matching: same number of segments, each must match
 	path_parts := split(path, "/")
 	pattern_parts := split(pattern, "/")
@@ -512,16 +521,14 @@ segment_matches(path_segment, pattern_segment) if {
 	path_segment != ""
 }
 
-# Normalize endpoint path by matching against defined endpoint patterns
+# Normalize endpoint path and method against defined endpoint patterns
 # Removes query parameters and matches path against configured endpoint patterns
 # Returns the matching pattern for looking up permissions and scopes
 # If multiple patterns match, returns the most specific one (fewest placeholders)
-normalize_endpoint(path) := pattern if {
+normalize_endpoint(path, method) := pattern if {
 	base_path := split(path, "?")[0]
-	matching_patterns := {p |
-		some p in object.keys(data.authz.endpoints)
-		path_matches_pattern(base_path, p)
-	}
+	path_patterns := patterns_for_path(base_path)
+	matching_patterns := patterns_for_method(path_patterns, method)
 
 	# Find the pattern with the fewest placeholders (most specific)
 	# Count placeholders by counting segments that start with {
@@ -540,6 +547,38 @@ normalize_endpoint(path) := pattern if {
 	pattern_scores[pattern] == min_score
 }
 
+# The HF metadata namespace is reserved before method selection, just as the
+# application registers its rejection route before the download catch-all.
+hf_metadata_prefix := "/apis/files/v2/hf/api/models/"
+
+hf_metadata_fallback := concat("", [hf_metadata_prefix, "{path:path}"])
+
+patterns_for_path(path) := metadata if {
+	startswith(path, hf_metadata_prefix)
+	metadata := {p |
+		some p in object.keys(data.authz.endpoints)
+		startswith(p, hf_metadata_prefix)
+		p != hf_metadata_fallback
+		path_matches_pattern(path, p)
+	}
+	count(metadata) > 0
+} else := {hf_metadata_fallback} if {
+	path == trim_suffix(hf_metadata_prefix, "/")
+} else := {hf_metadata_fallback} if {
+	startswith(path, hf_metadata_prefix)
+} else := {p |
+	some p in object.keys(data.authz.endpoints)
+	path_matches_pattern(path, p)
+}
+
+# FastAPI skips path matches that do not support the request method. If none
+# supports it, retain a known path so its missing method contract denies access
+# rather than entering the legacy unknown-path service/admin bypass.
+patterns_for_method(patterns, method) := supported if {
+	supported := {p | some p in patterns; data.authz.endpoints[p][lower(method)]}
+	count(supported) > 0
+} else := patterns
+
 # --- Request-scoped memoization -------------------------------------------------
 # extract_path and extract_method are 0-arg rules, and OPA caches complete-rule
 # results for the lifetime of a single query. normalize_endpoint scans every
@@ -549,7 +588,7 @@ normalize_endpoint(path) := pattern if {
 # The functions above are kept intact — the policy tests call them with explicit
 # paths/methods, which must not be tied to the live request path.
 endpoint_scan := e if {
-	e := normalize_endpoint(extract_path)
+	e := normalize_endpoint(extract_path, extract_method)
 } else := ""
 
 req_method_lower := lower(extract_method)

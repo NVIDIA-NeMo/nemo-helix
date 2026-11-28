@@ -24,9 +24,9 @@ _PRINCIPAL_ALIASES_HEADER = "x-nhx-actor-aliases"
 _ON_BEHALF_OF_HEADER = "x-nhx-principal-on-behalf-of"
 # Companion metadata for the on-behalf-of principal. The platform derives the
 # delegated user's groups/email from these (Principal.from_headers -> effective_*),
-# and effective_groups/effective_email feed the PDP authorization input. We stamp
-# only the OBO id here, so any inbound companion headers are untrusted and must be
-# dropped — otherwise a colocated workload could pair our stamped OBO id with
+# and effective_groups/effective_email feed the PDP authorization input. Any
+# inbound companion headers are untrusted and must be dropped before stamping
+# captured creator context — otherwise a colocated workload could pair our OBO id with
 # attacker-chosen groups/email and be evaluated with those, defeating the scoping.
 _ON_BEHALF_OF_EMAIL_HEADER = "x-nhx-principal-on-behalf-of-email"
 _ON_BEHALF_OF_GROUPS_HEADER = "x-nhx-principal-on-behalf-of-groups"
@@ -69,7 +69,8 @@ _STRIP_REQUEST_HEADERS = _HOP_BY_HOP_HEADERS | frozenset(
         _SCOPES_HEADER,
     }
 )
-# We stream the response, so the upstream's framing headers no longer apply.
+# We stream response bodies, so their upstream framing headers no longer apply.
+# HEAD has no response body; its Content-Length describes the representation.
 _STRIP_RESPONSE_HEADERS = _HOP_BY_HOP_HEADERS | frozenset({"content-length"})
 _MULTI_VALUE_RESPONSE_HEADERS = frozenset({"set-cookie"})
 
@@ -154,9 +155,12 @@ def build_auth_proxy_app(
             finally:
                 await response.aclose()
 
+        response_headers_to_strip = _STRIP_RESPONSE_HEADERS
+        if request.method == "HEAD" and "transfer-encoding" not in response.headers:
+            response_headers_to_strip = _HOP_BY_HOP_HEADERS
         resp_headers = _sanitized_headers(
             response.headers,
-            strip=_STRIP_RESPONSE_HEADERS | _MULTI_VALUE_RESPONSE_HEADERS,
+            strip=response_headers_to_strip | _MULTI_VALUE_RESPONSE_HEADERS,
         )
         proxy_response = StreamingResponse(
             _body(),

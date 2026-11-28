@@ -395,6 +395,11 @@ class OpenShellDeploymentBackend(DeploymentBackend):
                     raise ValueError("This OpenShell executor has no gateway_credentials configuration.")
                 if platform_auth_enabled() and config.auth_proxy_sidecar and not config.auth_proxy_sidecar_on_behalf_of:
                     raise ValueError("Provider deployments require a delegated creator identity for platform access.")
+                if platform_auth_enabled() and config.auth_proxy_sidecar:
+                    if auth_context is None or config.auth_proxy_sidecar_on_behalf_of != (
+                        auth_context.principal_on_behalf_of or auth_context.principal_id
+                    ):
+                        raise ValueError("Provider delegation must match the captured creator auth context.")
                 validate_provider_environment(
                     provider_bindings,
                     workspace=workspace,

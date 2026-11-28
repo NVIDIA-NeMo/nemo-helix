@@ -12,6 +12,7 @@ from nemo_deployments_plugin.auth_proxy import build_auth_proxy_container
 from nemo_deployments_plugin.backends.labels import docker_volume_name
 from nemo_deployments_plugin.entities import Container, DeploymentConfig, DockerDeploymentConfig, VolumeMount
 from nemo_deployments_plugin.types import RestartPolicy
+from nemo_helix_plugin.auth import AuthContext
 
 
 class DeploymentConfigError(ValueError):
@@ -44,7 +45,7 @@ def parse_docker_backend_config(backend_config: dict[str, Any]) -> DockerDeploym
     return DockerDeploymentConfig.model_validate(docker_section)
 
 
-def build_docker_plan(config: DeploymentConfig) -> DockerDeploymentPlan:
+def build_docker_plan(config: DeploymentConfig, *, auth_context: AuthContext | None = None) -> DockerDeploymentPlan:
     """Split a DeploymentConfig into a docker orchestration plan.
 
     The first container is the primary/server; any additional containers are
@@ -62,7 +63,7 @@ def build_docker_plan(config: DeploymentConfig) -> DockerDeploymentPlan:
     # Auth-proxy sidecar (no-op unless requested and platform auth is enabled).
     # It shares the primary's netns, so the primary reaches it on localhost —
     # the same loopback address the workload targets in k8s. Declares no ports.
-    auth_proxy = build_auth_proxy_container(config, docker=True)
+    auth_proxy = build_auth_proxy_container(config, docker=True, auth_context=auth_context)
     if auth_proxy is not None:
         sidecars.append(auth_proxy)
 

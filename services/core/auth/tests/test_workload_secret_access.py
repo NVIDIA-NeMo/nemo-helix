@@ -122,7 +122,6 @@ def test_signed_workload_reads_persisted_secret(
                 scope="platform:read platform:write secrets:read jobs:read",
                 token_private_key_file=str(key_file),
                 token_key_id="local-repro-key",
-                kubernetes_token_review_enabled=proof_kind == "kubernetes",
             ),
         ),
     )

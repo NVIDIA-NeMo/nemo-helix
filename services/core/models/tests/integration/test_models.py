@@ -19,6 +19,7 @@ import pytest
 from nemo_helix_plugin.client.errors import ConflictError, UnprocessableEntityError
 from nemo_helix_plugin.entities import is_workspace_not_found
 from nemo_helix_plugin.entities.types import WORKSPACE_NOT_FOUND_CODE
+from nemo_helix_plugin.jobs.image import get_qualified_image
 from nemo_helix_plugin.models.client import ModelsClient
 from nemo_helix_plugin.models.types import CreateModelEntityRequest
 from nemo_helix_plugin.workspaces.client import WorkspacesClient
@@ -1562,7 +1563,7 @@ def test_backend_config_key_deployments_plugin_works_end_to_end():
     registry = BackendRegistry.from_config(
         client=AsyncMock(),
         backend_configs=backend_configs,
-        huggingface_model_puller=config.huggingface_model_puller,
+        huggingface_model_puller=get_qualified_image("nhx-api"),
     )
 
     assert registry.list_backends() == ["deployments_plugin"]

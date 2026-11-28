@@ -738,6 +738,10 @@ components:
             default.
           default: 8Gi
           type: string
+        authProxySidecar:
+          type: boolean
+          title: Authproxysidecar
+          default: false
         workloadIdentity:
           $ref: '#/components/schemas/WorkloadIdentitySpec'
       type: object
@@ -1018,18 +1022,16 @@ components:
           default: false
         authProxySidecarIdentity:
           title: Authproxysidecaridentity
-          description: 'Service-principal name the auth-proxy sidecar stamps (interpolated
-            into ''X-NHX-Principal-Id: service:<identity>''). Required when auth_proxy_sidecar
-            is True.'
+          description: 'Server-managed service-principal name the auth-proxy sidecar
+            stamps (interpolated into ''X-NHX-Principal-Id: service:<identity>'').
+            Required when auth_proxy_sidecar is True.'
           type: string
         authProxySidecarOnBehalfOf:
           title: Authproxysidecaronbehalfof
-          description: Optional principal id the auth-proxy sidecar delegates to via
-            'X-NHX-Principal-On-Behalf-Of'. When set, the service principal acts on
-            behalf of this identity so the platform scopes the workload's access to
-            what that principal can reach (e.g. the deployment's creator) rather than
-            the service principal's full reach. Only meaningful when auth_proxy_sidecar
-            is True.
+          description: Server-managed delegation hint, validated against the Deployment's
+            captured creator. Container backends derive delegation from that creator
+            even when this field is absent. The public create API does not accept
+            this field.
           type: string
         workloadIdentity:
           $ref: '#/components/schemas/WorkloadIdentitySpec'

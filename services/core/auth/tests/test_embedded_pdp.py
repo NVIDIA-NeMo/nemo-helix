@@ -3,14 +3,27 @@
 
 """Tests for the WASM policy engine."""
 
+import json
 from pathlib import Path
 from queue import Queue
 from threading import Thread
 from typing import Any, ClassVar
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
+import httpx
 import pytest
+import respx
 import yaml
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+from nemo_deployments_plugin.auth_proxy import build_auth_proxy_container
+from nemo_deployments_plugin.deployment_auth import plan_deployment_auth
+from nemo_deployments_plugin.entities import DeploymentConfig
+from nemo_helix_plugin.auth import AuthContext
+from nhx.common.auth.middleware import AuthorizationMiddleware
+from nhx.common.auth.workload_proxy import main as workload_proxy
+from nhx.common.config import AuthConfig
+from nhx.common.service.dependencies import get_entity_client
 from nhx.core.auth.app.embedded_pdp import (
     OPAPolicy,
     PolicyEngineError,
@@ -21,6 +34,7 @@ from nhx.core.auth.app.embedded_pdp import (
     set_policy_data,
     validate_entrypoint,
 )
+from nhx.core.files.api.v2.hf.endpoints import router as hf_router
 
 
 @pytest.fixture
@@ -44,6 +58,104 @@ def test_access_key_lifecycle_routes_are_available_to_authenticated_owners(
             "delegated": {"actor_perms": [], "subject_perms": []},
             "scopes": ["auth:write", "platform:write"],
         }
+
+
+@pytest.mark.parametrize("delegated", [False, True])
+@pytest.mark.parametrize("has_group_grant", [False, True])
+@pytest.mark.parametrize("explicit_delegation", [False, True])
+def test_legacy_proxy_preserves_creator_group_authorization(
+    static_authz_data: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+    delegated: bool,
+    has_group_grant: bool,
+    explicit_delegation: bool,
+) -> None:
+    creator = AuthContext(
+        principal_id="user:alice",
+        principal_groups=["research"],
+        principal_email="alice@example.test",
+        principal_account_id="account:alice",
+        principal_authz_aliases=["user:alice", "alice@example.test"],
+    )
+    if delegated:
+        creator = AuthContext(
+            principal_id="service:models",
+            principal_groups=["admins"],
+            principal_on_behalf_of=creator.principal_id,
+            principal_on_behalf_of_groups=creator.principal_groups,
+            principal_on_behalf_of_email=creator.principal_email,
+            principal_on_behalf_of_account_id=creator.principal_account_id,
+            principal_on_behalf_of_authz_aliases=creator.principal_authz_aliases,
+        )
+    with (
+        patch("nemo_deployments_plugin.deployment_auth.platform_auth_enabled", return_value=True),
+        patch(
+            "nemo_deployments_plugin.deployment_auth.is_workload_identity_token_exchange_enabled", return_value=False
+        ),
+        patch("nemo_deployments_plugin.auth_proxy.platform_auth_enabled", return_value=True),
+        patch("nemo_deployments_plugin.auth_proxy.get_qualified_image", return_value="nhx-api:test"),
+        patch("nemo_deployments_plugin.auth_proxy._upstream_base_url", return_value="http://platform.test"),
+    ):
+        plan = plan_deployment_auth(
+            service_identity="models",
+            on_behalf_of="user:alice",
+            auth_context=creator,
+            workload_name="puller",
+            workload_label="Model weight puller",
+        )
+        assert plan.error is None
+        container = build_auth_proxy_container(
+            DeploymentConfig(
+                name="puller",
+                workspace="default",
+                auth_proxy_sidecar=True,
+                auth_proxy_sidecar_identity=plan.auth_proxy_identity,
+                auth_proxy_sidecar_on_behalf_of=plan.auth_proxy_on_behalf_of if explicit_delegation else None,
+            ),
+            auth_context=creator,
+        )
+    assert container is not None
+    for env in container.env:
+        assert env.value is not None
+        monkeypatch.setenv(env.name, env.value)
+    monkeypatch.delenv("NEMO_BASE_URL", raising=False)
+    monkeypatch.delenv("NHX_WORKLOAD_IDENTITY_TOKEN_FILE", raising=False)
+    _, _, _, _, _, server = workload_proxy._build_server()
+    static_authz_data["authz"]["principals"] = {
+        "research": {"workspaces": {"default": ["Viewer"] if has_group_grant else []}},
+        "admins": {"workspaces": {"default": ["Admin"]}},
+    }
+    set_policy_data(static_authz_data)
+    path = "/apis/files/v2/hf/api/models/default/model/revision/main"
+
+    def authorize(request: httpx.Request) -> httpx.Response:
+        result = evaluate(
+            "allow",
+            {"attributes": {"request": {"http": {"method": "GET", "path": path, "headers": dict(request.headers)}}}},
+        )
+        return httpx.Response(200 if result["allowed"] else 403)
+
+    with respx.mock:
+        route = respx.get(f"http://platform.test{path}").mock(side_effect=authorize)
+        assert isinstance(server.config.app, FastAPI)
+        with TestClient(server.config.app) as client:
+            response = client.get(
+                path,
+                headers={
+                    "x-nhx-principal-on-behalf-of": "user:mallory",
+                    "x-nhx-principal-on-behalf-of-groups": "admins",
+                    "x-nhx-subject-account-id": "account:mallory",
+                    "x-nhx-subject-aliases": "user:mallory",
+                },
+            )
+    assert response.status_code == (200 if has_group_grant else 403)
+    sent = route.calls.last.request.headers
+    assert sent["x-nhx-principal-id"] == "service:models"
+    assert sent["x-nhx-principal-on-behalf-of"] == "user:alice"
+    assert sent["x-nhx-principal-on-behalf-of-groups"] == "research"
+    assert sent["x-nhx-principal-on-behalf-of-email"] == "alice@example.test"
+    assert sent["x-nhx-subject-account-id"] == "account:alice"
+    assert sent["x-nhx-subject-aliases"] == "user:alice,alice@example.test"
 
 
 @pytest.fixture
@@ -87,6 +199,91 @@ def minimal_authz_data():
             },
         }
     }
+
+
+@pytest.mark.parametrize("delegated", [False, True])
+@pytest.mark.parametrize("granted_workspace", ["api", "resolve"])
+@pytest.mark.parametrize(
+    ("method", "suffix", "workspace"),
+    [
+        ("GET", "/api/models/resolve/incident", "resolve"),
+        ("GET", "/api/models/resolve/incident/revision/main", "resolve"),
+        ("GET", "/api/models/resolve/incident/tree/main", "resolve"),
+        ("POST", "/api/models/resolve/incident/paths-info/main", "resolve"),
+        ("HEAD", "/api/models/resolve/incident/revision/main", None),
+        ("GET", "/api/models/resolve/incident/weights/model.bin", None),
+        ("HEAD", "/api/models/resolve/incident/weights/model.bin", None),
+        ("GET", "/resolve/model/resolve/main/config.json", "resolve"),
+        ("HEAD", "/resolve/model/resolve/main/config.json", "resolve"),
+        ("GET", "/resolve/model/resolve/main/api/models/nested.bin", "resolve"),
+        ("HEAD", "/resolve/model/resolve/main/api/models/nested.bin", "resolve"),
+    ],
+)
+def test_hf_overlapping_routes_use_the_application_workspace(
+    static_authz_data: dict[str, Any],
+    method: str,
+    suffix: str,
+    workspace: str | None,
+    granted_workspace: str,
+    delegated: bool,
+) -> None:
+    static_authz_data["authz"]["principals"] = {"reader": {"workspaces": {granted_workspace: ["Viewer"]}}}
+    set_policy_data(static_authz_data)
+    request = {
+        "principal_id": "reader",
+        "method": method,
+        "path": f"/apis/files/v2/hf{suffix}",
+        "scopes": ["platform:read"],
+    }
+    if delegated:
+        request["principal_id"] = "system:serviceaccount:cluster:default"
+        request["on_behalf_of_principal_id"] = "reader"
+
+    result = evaluate("allow", request)
+
+    assert result["allowed"] is (workspace == granted_workspace)
+
+
+@pytest.mark.asyncio
+async def test_encoded_hf_metadata_prefix_cannot_read_another_workspace(
+    static_authz_data: dict[str, Any],
+) -> None:
+    static_authz_data["authz"]["principals"] = {"reader": {"workspaces": {"resolve": ["Viewer"]}}}
+    set_policy_data(static_authz_data)
+    decisions: list[bool] = []
+    inputs: list[dict[str, Any]] = []
+
+    def authorize(request: httpx.Request) -> httpx.Response:
+        policy_input = json.loads(request.content)["input"]
+        inputs.append(policy_input)
+        result = evaluate("allow", policy_input)
+        decisions.append(result["allowed"])
+        return httpx.Response(200, json={"result": result})
+
+    # Reaching a metadata/download handler would attempt this dependency. The
+    # reserved-prefix handler must reject the full decoded path before any read.
+    entity_lookup = MagicMock(side_effect=AssertionError("Encoded HF path reached a fileset read"))
+    app = FastAPI()
+    app.include_router(hf_router, prefix="/apis/files")
+    app.dependency_overrides[get_entity_client] = entity_lookup
+    config = AuthConfig(enabled=True, policy_decision_point_base_url="http://policy.test")
+    async with httpx.AsyncClient(transport=httpx.MockTransport(authorize)) as pdp_client:
+        app.add_middleware(AuthorizationMiddleware, service_name="files", http_client=pdp_client)
+        with patch("nhx.common.auth.middleware.get_auth_config", return_value=config):
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url="http://files.test") as client:
+                response = await client.get(
+                    "/apis/files/v2/hf/api/models/resolve/incident/revision/main%3F/weights.bin",
+                    headers={"X-NHX-Principal-Id": "reader", "X-NHX-Scopes": "platform:read"},
+                )
+
+    assert len(inputs) == 1
+    assert inputs[0]["principal_id"] == "reader"
+    # If path normalization is corrected later, authorization may deny first.
+    # Today it can authorize truncated metadata, but routing must still reject.
+    assert response.status_code == (404 if decisions[0] else 403)
+    if response.status_code == 404:
+        assert "regular Files API" in response.json()["detail"]
+    entity_lookup.assert_not_called()
 
 
 @pytest.fixture(autouse=True)
@@ -941,6 +1138,7 @@ class TestPerAreaScopes:
     # POST endpoints that are semantically read operations (e.g. query endpoints).
     # These correctly use :read scopes despite being POST methods.
     READ_POST_ENDPOINTS: ClassVar[set[str]] = {
+        "/apis/files/v2/hf/api/models/{workspace}/{name}/paths-info/{revision}",
         "/apis/files/v2/workspaces/{workspace}/filesets/{name}/otlp/v1/logs/query",
     }
 

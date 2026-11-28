@@ -78,7 +78,7 @@ test_principal_has_role if {
 
 # Debug test - check endpoint normalization
 test_endpoint_normalization if {
-    normalized := common.normalize_endpoint("/apis/models/v2/workspaces/test-ns/models/model-123")
+    normalized := common.normalize_endpoint("/apis/models/v2/workspaces/test-ns/models/model-123", "GET")
         with data.authz.endpoints as mock_authz_data.endpoints
     normalized == "/apis/models/v2/workspaces/{workspace}/models/{name}"
 }

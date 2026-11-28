@@ -321,7 +321,6 @@ nemo-helix:
             - '{{ include "nemo-helix-authentik.serviceUrl" (dict "root" . "serviceName" "authentik-server" "scheme" "http") }}/application/o/nemo-workload/'
             - '{{ include "nemo-helix-authentik.serviceUrl" (dict "root" . "serviceName" "nemo-helix-envoy" "namespace" .Values.envoyProxy.serviceNamespace "scheme" "https" "port" 8080) }}/application/o/nemo-workload/'
             - '{{ include "nemo-helix-authentik.publicGatewayUrl" . }}/application/o/nemo-workload/'
-          kubernetes_token_review_enabled: true
         subject_claim: "sub"
         email_claim: "email"
         groups_claim: "groups"

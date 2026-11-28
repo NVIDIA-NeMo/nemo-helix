@@ -159,7 +159,13 @@ def test_shipped_static_authz_yaml_passes_validation() -> None:
     for methods in data["authz"]["endpoints"].values():
         for declaration in methods.values():
             assert "permissions" not in declaration
-            assert "direct" in declaration or "delegated" in declaration
+            assert declaration.get("deny") is True or "direct" in declaration or "delegated" in declaration
+
+
+def test_explicit_deny_does_not_require_authorization_branches() -> None:
+    declaration = {"deny": True}
+    validate_static_authz_data({"authz": {"endpoints": {"/api/reserved": {"get": declaration}}}})
+    assert declaration == {"deny": True}
 
 
 @pytest.mark.parametrize(

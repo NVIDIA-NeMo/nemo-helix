@@ -15,6 +15,7 @@ from nemo_deployments_plugin.backends.docker.containers import (
     validate_config_for_docker,
 )
 from nemo_deployments_plugin.entities import Container, ContainerPort, DeploymentConfig
+from nemo_helix_plugin.auth import AuthContext
 
 _AUTH_PROXY_MOD = "nemo_deployments_plugin.auth_proxy"
 
@@ -35,7 +36,7 @@ def test_auth_proxy_injected_as_docker_sidecar_when_auth_on() -> None:
         patch(f"{_AUTH_PROXY_MOD}.get_qualified_image", return_value="my-registry/nhx-api:local"),
         patch(f"{_AUTH_PROXY_MOD}._upstream_base_url", return_value="http://host.docker.internal:8080"),
     ):
-        plan = build_docker_plan(config)
+        plan = build_docker_plan(config, auth_context=AuthContext(principal_id="user:alice"))
     # Injected as a sidecar (shares primary netns), not the primary.
     assert plan.primary.name == "main"
     proxy = next(c for c in plan.sidecars if c.name == "auth-proxy")
@@ -51,6 +52,25 @@ def test_auth_proxy_not_injected_when_auth_off() -> None:
     with patch(f"{_AUTH_PROXY_MOD}.platform_auth_enabled", return_value=False):
         plan = build_docker_plan(config)
     assert plan.sidecars == []
+
+
+def test_docker_plan_preserves_captured_creator_context() -> None:
+    creator = AuthContext(principal_id="user:alice", principal_groups=["research"])
+    config = sample_config().model_copy(
+        update={
+            "auth_proxy_sidecar": True,
+            "auth_proxy_sidecar_identity": "models",
+            "auth_proxy_sidecar_on_behalf_of": "user:alice",
+        }
+    )
+    with patch(f"{_AUTH_PROXY_MOD}.platform_auth_enabled", return_value=True):
+        plan = build_docker_plan(config, auth_context=creator)
+
+    proxy = next(container for container in plan.sidecars if container.name == "auth-proxy")
+    env = {item.name: item.value for item in proxy.env}
+    raw_context = env["NHX_AUTH_PROXY_AUTH_CONTEXT"]
+    assert raw_context is not None
+    assert AuthContext.model_validate_json(raw_context) == creator
 
 
 def test_auth_proxy_docker_upstream_rewrites_loopback() -> None:

@@ -415,11 +415,13 @@ class WorkloadTokenExchangeService:
 
         errors: list[str] = []
         for decoder in (
-            _SubjectTokenDecoder("JWT subject token", decode_configured_jwt_subject_token),
+            # Preserve the verified pod reference even when JWKS validation
+            # would also accept a projected Kubernetes service-account token.
             _SubjectTokenDecoder(
                 "Kubernetes TokenReview subject token",
                 lambda: _decode_kubernetes_subject_token(config, subject_token, audience),
             ),
+            _SubjectTokenDecoder("JWT subject token", decode_configured_jwt_subject_token),
         ):
             try:
                 return await decoder.decode()
@@ -581,7 +583,7 @@ async def _decode_kubernetes_subject_token(
     audience: str,
 ) -> DecodedSubjectToken:
     workload = config.oidc.workload
-    if workload is None or not workload.kubernetes_token_review_enabled:
+    if workload is None:
         raise jwt.InvalidTokenError("Kubernetes TokenReview subject token validation is disabled")
 
     import os
@@ -591,9 +593,9 @@ async def _decode_kubernetes_subject_token(
     if not host:
         raise jwt.InvalidTokenError("Kubernetes service environment is unavailable")
 
-    reviewer_token, ca_path = _kubernetes_reviewer_credentials()
     token_review_url = f"https://{host}:{port}/apis/authentication.k8s.io/v1/tokenreviews"
     try:
+        reviewer_token, ca_path = _kubernetes_reviewer_credentials()
         async with AsyncClient(timeout=10.0, verify=ca_path) as client:
             response = await client.post(
                 token_review_url,
@@ -611,7 +613,7 @@ async def _decode_kubernetes_subject_token(
                 },
             )
         response.raise_for_status()
-    except httpx.HTTPError as exc:
+    except (httpx.HTTPError, OSError) as exc:
         raise jwt.InvalidTokenError(f"Kubernetes TokenReview request failed: {exc}") from exc
 
     token_review = response.json()

@@ -89,7 +89,7 @@ scope_check_passed if {
 
 # Get required scopes for an endpoint/method combination
 get_required_scopes(path, method) := scopes if {
-	endpoint := normalize_endpoint(path)
+	endpoint := normalize_endpoint(path, method)
 	method_lower := lower(method)
 	scopes := data.authz.endpoints[endpoint][method_lower].scopes
 } else := []

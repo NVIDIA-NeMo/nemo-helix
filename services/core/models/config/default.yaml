@@ -3,7 +3,6 @@
 
 # Default configuration for Models service
 models:
-  huggingface_model_puller: "nvcr.io/nvidia/nemo-microservices/nds-v2-huggingface-cli:25.10"
   controller:
     interval_seconds: 10
     model_deployment_garbage_collection_ttl_seconds: 30

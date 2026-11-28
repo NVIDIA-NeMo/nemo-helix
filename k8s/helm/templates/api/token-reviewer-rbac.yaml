@@ -1,0 +1,38 @@
+{{/*
+SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+SPDX-License-Identifier: Apache-2.0
+*/}}
+
+{{- $config := include "nemo-helix.calculatedConfig" . | fromYaml -}}
+{{- $oidc := dig "auth" "oidc" (dict) $config | default dict -}}
+{{- $workload := $oidc.workload | default dict -}}
+{{- if and .Values.api.enabled (include "nemo-helix.authEnabled" .) $workload -}}
+{{- /* Cluster-scoped names must distinguish releases in different namespaces. */ -}}
+{{- $identity := printf "%s/%s" .Release.Namespace .Release.Name -}}
+{{- $name := printf "%s-token-reviewer-%s" (include "nemo-helix.fullname" . | trunc 39 | trimSuffix "-") ($identity | sha256sum | trunc 8) -}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "nemo-helix.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["authentication.k8s.io"]
+    resources: ["tokenreviews"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "nemo-helix.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ $name }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "nhx-api.apiServiceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}

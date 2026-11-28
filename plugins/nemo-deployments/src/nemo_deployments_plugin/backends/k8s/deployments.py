@@ -105,6 +105,7 @@ def build_deployment_body(
     executor_image_pull_secrets: list | None = None,
     executor_defaults: ExecutorK8sDefaults | None = None,
     secret_env: dict[str, str] | None = None,
+    auth_context: AuthContext | None = None,
 ) -> BuiltDeployment:
     """Build an ``apps/v1.Deployment`` for create and its compiled workload."""
     k8s = k8s_client_module()
@@ -120,6 +121,7 @@ def build_deployment_body(
         executor_image_pull_secrets=executor_image_pull_secrets,
         executor_defaults=executor_defaults,
         secret_env=secret_env,
+        auth_context=auth_context,
     )
     deployment = k8s.client.V1Deployment(
         api_version="apps/v1",
@@ -366,6 +368,7 @@ async def create_deployment(
             executor_image_pull_secrets=executor_image_pull_secrets,
             executor_defaults=executor_defaults,
             secret_env=secret_env,
+            auth_context=auth_context,
         )
         deployment_body = built.deployment
         compiled = built.compiled

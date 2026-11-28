@@ -376,7 +376,7 @@ class DeploymentConfig(NemoEntity, entity_type=ENTITY_TYPE_DEPLOYMENT_CONFIG):
         default=None,
         alias="authProxySidecarIdentity",
         description=(
-            "Service-principal name the auth-proxy sidecar stamps (interpolated into "
+            "Server-managed service-principal name the auth-proxy sidecar stamps (interpolated into "
             "'X-NHX-Principal-Id: service:<identity>'). Required when auth_proxy_sidecar is True."
         ),
     )
@@ -384,11 +384,9 @@ class DeploymentConfig(NemoEntity, entity_type=ENTITY_TYPE_DEPLOYMENT_CONFIG):
         default=None,
         alias="authProxySidecarOnBehalfOf",
         description=(
-            "Optional principal id the auth-proxy sidecar delegates to via "
-            "'X-NHX-Principal-On-Behalf-Of'. When set, the service principal acts on behalf of this "
-            "identity so the platform scopes the workload's access to what that principal can reach "
-            "(e.g. the deployment's creator) rather than the service principal's full reach. "
-            "Only meaningful when auth_proxy_sidecar is True."
+            "Server-managed delegation hint, validated against the Deployment's captured creator. "
+            "Container backends derive delegation from that creator even when this field is absent. "
+            "The public create API does not accept this field."
         ),
     )
     workload_identity: WorkloadIdentitySpec | None = Field(default=None, alias="workloadIdentity")

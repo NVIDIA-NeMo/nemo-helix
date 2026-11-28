@@ -463,12 +463,15 @@ def test_malformed_selected_branch_is_rejected_before_evaluation(
         policy.set_data(policy_data)
 
 
-def test_undeclared_method_has_no_branch_even_for_admin(policy: OPAPolicy) -> None:
+@pytest.mark.parametrize("actor", ["service:platform-admin", "service:admin", "platform-admin", "administrator"])
+@pytest.mark.parametrize("method", ["OPTIONS", "PATCH", "DELETE"])
+@pytest.mark.parametrize("query", ["", "?download=true"])
+def test_undeclared_method_has_no_branch_even_for_admin(policy: OPAPolicy, actor: str, method: str, query: str) -> None:
     result = policy.evaluate(
         {
-            "principal_id": "service:platform-admin",
-            "method": "OPTIONS",
-            "path": "/apis/secrets/v2/workspaces/private/secrets/example/access",
+            "principal_id": actor,
+            "method": method,
+            "path": f"/apis/secrets/v2/workspaces/private/secrets/example/access{query}",
         },
         entrypoint=0,
     )
