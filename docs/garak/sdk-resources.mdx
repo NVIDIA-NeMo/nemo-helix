@@ -73,6 +73,7 @@ Call `.wait_until_done()` on the handle to block until the job completes, then `
 | `workspace` | `str \| None` | No | Workspace to submit the job into. Defaults to `"default"`. |
 | `max_probe_retries` | `int` | No | Number of times to retry a failing garak probe before marking it as failed. Defaults to `0`. |
 | `fail_job_on_retries_exhausted` | `bool` | No | When `True` (the default), the job fails if any probe exhausts its retries. Set to `False` to treat retry-exhausted probes as warnings. |
+| `publication` | `PublicationSpec \| None` | No | Publishes the results to NeMo Intake under an existing Evaluation. See [Publish an Audit to Experiments](/documentation/vulnerability-scanning/publish-to-experiments). Defaults to `None`, which publishes nowhere. |
 
 ### `GarakJobResource`
 
@@ -124,6 +125,7 @@ The work happens entirely on the host running the SDK call — there is no remot
 | `config` | `AuditConfig \\| str` | Yes | An inline `AuditConfig` instance or a name string referencing one in the entity store. A bare name such as `"quick-scan"` resolves against the `workspace` argument; a qualified name such as `"prod/quick-scan"` always uses the workspace prefix. |
 | `target` | `AuditTarget \\| str` | Yes | An inline `AuditTarget` instance or a name string, with the same resolution rules as `config`. |
 | `workspace` | `str \\| None` | No | Workspace used both as the entity-lookup fallback and as the scope for the local `JobContext`. Defaults to `"default"`. |
+| `publication` | `PublicationSpec \\| None` | No | Publishes the results to NeMo Intake under an existing Evaluation, using this client's identity. See [Publish an Audit to Experiments](/documentation/vulnerability-scanning/publish-to-experiments). Defaults to `None`, which publishes nowhere. |
 
 ### `run()` return value
 
@@ -131,12 +133,13 @@ The work happens entirely on the host running the SDK call — there is no remot
 
 | Key | Type | Description |
 |-----|------|-------------|
-| `status` | `str` | `"completed"` when every probe succeeds, `"partial"` when at least one probe succeeds and at least one fails, or `"failed"` when no probe completes. |
+| `status` | `str` | `"completed"` when every probe succeeds, `"partial"` when at least one probe succeeds and at least one fails, or `"failed"` when no probe completes or a required publication fails. |
 | `probes_total` | `int` | Number of probes selected for the run. Present for `completed` and `partial` results. |
 | `probes_complete` | `int` | Number of probes that completed successfully. Present for `completed` and `partial` results. |
 | `probes_failed` | `int` | Number of probes that exhausted their retries. Present for `completed` and `partial` results. |
 | `error` | `str` | Failure reason. Present only when `status` is `"failed"`. |
 | `results` | `dict[str, dict]` | One entry per produced report artifact. Each value is a `ResultRef` (`{"name": str, "artifact_url": str}`). For local runs, `artifact_url` is a `file://` URL under the scheduler's temporary results directory. |
+| `publication` | `dict` | What publication did. Present only when the audit asked to publish. See [Publish an Audit to Experiments](/documentation/vulnerability-scanning/publish-to-experiments#what-gets-published). |
 
 The `results` dict can contain up to three keys, each present only if the corresponding file was produced:
 

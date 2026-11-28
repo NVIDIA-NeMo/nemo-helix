@@ -124,6 +124,7 @@ DOCS_TYPED_SNIPPET_PATHS := \
 	docs/agents/optimize-agents.mdx \
 	docs/anonymizer/tutorials/preview.mdx \
 	docs/garak/targets/index.mdx \
+	docs/garak/publish-to-experiments.mdx \
 	docs/garak/targets/inference-gateway.mdx \
 	docs/auth/authorization/plugin-authorization.mdx \
 	docs/auth/authorization/policy-engine.mdx \

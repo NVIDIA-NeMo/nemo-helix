@@ -1,0 +1,91 @@
+---
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+title: "Publish an Audit to Experiments"
+description: "Publish garak audit results to NeMo Intake so they appear in Experiments next to other evaluation runs."
+---
+<a id="garak-publish-to-experiments"></a>
+
+By default an audit saves garak's JSONL, HTML and hitlog reports and doesn't send anything to NeMo Intake. To see the results in [Experiments](/documentation/evaluate-models/experiments) and compare audits of different models, add a `publication.intake` block to the audit. The plugin then publishes the results to Intake under the Evaluation you name.
+
+Publication runs after the reports are saved. It works the same way for a submitted job (`submit()`) and for a local run (`run()`), and it publishes with the identity of the client that started the audit.
+
+## Create the Evaluation First
+
+The audit does not create the Evaluation. Create an Experiment and an Evaluation before you start the audit, one Evaluation per audit run:
+
+```python
+from nemo_garak.sdk import GarakPluginResource
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.intake.client import IntakeClient
+from nemo_helix_plugin.intake.types import EvaluationCreateRequest, ExperimentCreateRequest
+
+client = NemoClient.from_config()
+garak = GarakPluginResource(client)
+intake = IntakeClient.from_client(client)
+
+experiment = intake.create_experiment(
+    workspace="default",
+    body=ExperimentCreateRequest(name="model-safety-audits"),
+    exist_ok=True,
+).data()
+
+intake.create_evaluation(
+    workspace="default",
+    body=EvaluationCreateRequest(
+        name="nemotron-lightning-quick-scan",
+        experiment_ids=[experiment.id],
+        dataset_name="garak",
+    ),
+)
+```
+
+## Publish from an Audit
+
+Pass `publication` to `run()` or `submit()`:
+
+```python
+from nemo_garak.jobs.publication import IntakePublicationSpec, PublicationSpec
+
+result = garak.run(
+    config="quick-scan",
+    target="nemotron-3.5-lightning-30b",
+    workspace="default",
+    publication=PublicationSpec(intake=IntakePublicationSpec(evaluation_id="nemotron-lightning-quick-scan")),
+)
+print(result["publication"])
+```
+
+In a job spec for `nemo garak audit`, add the same block, or pass `--publication.intake.evaluation-id`:
+
+```yaml
+config: quick-scan
+target: nemotron-3.5-lightning-30b
+publication:
+  intake:
+    evaluation_id: nemotron-lightning-quick-scan
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `evaluation_id` | `str` | _required_ | Name of the existing Evaluation to publish under. |
+| `agent_name` | `str \| None` | `None` | Agent name recorded on each published session. Defaults to the audit target's name. |
+| `required` | `bool` | `True` | When `True`, the audit fails if publication fails. Set to `False` to keep the audit successful and report the failure in its output. |
+
+## What Gets Published
+
+The plugin publishes one session per scored model output, with the prompt garak sent and the output the target returned. Each session belongs to the test case `garak/<probe>/<detector>`, for example `garak/malwaregen.Evasion/malwaregen.AnyCode`, and carries two evaluators:
+
+- `pass_rate` is 1.0 when the output passed the detector and 0.0 when it did not, so its mean over a test case is the pass rate garak reports for that probe and detector. An output passes when its detector score is below `run.eval_threshold` in the audit configuration.
+- `detector_score` is the detector's raw score from 0 to 1, where higher means a stronger hit.
+
+garak does not score every output: a detector returns no score for an empty response, for example. Those outputs are left out, as they are in garak's own pass rate.
+
+garak records an audit's start time without a time zone. The published sessions use that time as UTC, so publishing the same report again gives the same sessions from any machine. If the audit ran on a machine that isn't set to UTC, the time shown in Experiments is that machine's local clock time.
+
+The audit result has a `publication` key with the `status` (`"completed"` or `"error"`), the `evaluation_id`, the `session_count` published, the `unscored_count` left out and the `error`, if any.
+
+## Publish a Saved Report Again
+
+If publication fails, the reports are still saved. Call `nemo_garak.jobs.publication.publish_audit_report` with the saved `report.jsonl` to publish it without running the audit again. Publishing the same report twice replaces the sessions instead of duplicating them.

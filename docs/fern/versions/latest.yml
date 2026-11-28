@@ -435,6 +435,8 @@ navigation:
             contents:
               - page: Run an Audit Locally
                 path: ../../garak/tutorials/run-audit-locally.mdx
+          - page: Publish to Experiments
+            path: ../../garak/publish-to-experiments.mdx
           - page: SDK Resources
             path: ../../garak/sdk-resources.mdx
           - section: Configurations

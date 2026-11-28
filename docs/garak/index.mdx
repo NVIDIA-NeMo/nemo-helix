@@ -28,6 +28,7 @@ A typical audit looks like the following:
 1. Create an [audit target](/documentation/vulnerability-scanning/targets) for the model you want to test.
 1. Create an [audit configuration](/documentation/vulnerability-scanning/configurations) that selects which garak probes and detectors to run, along with reporting settings.
 1. [Run the audit](/documentation/vulnerability-scanning/tutorials/run-an-audit-locally) and inspect the resulting JSONL, HTML, and hitlog reports.
+1. Optionally, [publish the results to Experiments](/documentation/vulnerability-scanning/publish-to-experiments) to compare audits of different models.
 
 The plugin exposes both [synchronous and asynchronous](/documentation/vulnerability-scanning/sdk-resources) Python entry points for each step.
 
@@ -72,6 +73,11 @@ Choose probes, detectors, and reporting settings for the audit.
 <Card title="Run an Audit Locally" href="/documentation/vulnerability-scanning/tutorials/run-an-audit-locally">
 
 End-to-end walkthrough: create entities, run the audit in-process, read the report artifacts.
+
+</Card>
+<Card title="Publish to Experiments" href="/documentation/vulnerability-scanning/publish-to-experiments">
+
+Publish audit results to NeMo Intake so they appear in Experiments next to other evaluation runs.
 
 </Card>
 <Card title="SDK Resources" href="/documentation/vulnerability-scanning/sdk-resources">

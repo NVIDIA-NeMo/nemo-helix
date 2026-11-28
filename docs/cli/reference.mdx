@@ -9190,6 +9190,9 @@ nemo garak audit [OPTIONS] [COMMAND] [ARGS]...
 
 * `--max-probe-retries <INTEGER>`: Override `max_probe_retries` in the spec.
 * `--fail-job-on-retries-exhausted`: Override `fail_job_on_retries_exhausted` in the spec.
+* `--publication.intake.evaluation-id`: Name of the existing Evaluation to publish under. The audit does not create it.
+* `--publication.intake.agent-name`: Agent name recorded on each published session. Defaults to the audit target's name.
+* `--publication.intake.required`: Fail the audit when publication fails. The reports are saved first either way.
 
 **Spec Source:**
 

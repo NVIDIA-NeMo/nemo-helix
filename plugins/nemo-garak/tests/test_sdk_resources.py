@@ -32,6 +32,7 @@ from nemo_garak.entities import (
     AuditSystemData,
     AuditTarget,
 )
+from nemo_garak.jobs.publication import IntakePublicationSpec, PublicationSpec
 from nemo_garak.sdk import AsyncGarakPluginResource, GarakPluginResource
 from nemo_garak.sdk_resources.job_resources import AsyncGarakJobResource, GarakJobResource
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
@@ -425,6 +426,35 @@ class TestSyncJobMethods:
         assert body["spec"]["target"] == "ws/my-tgt"
         assert body["spec"]["max_probe_retries"] == 0
         assert body["spec"]["fail_job_on_retries_exhausted"] is True
+
+    def test_submit_sends_publication(self) -> None:
+        platform = _SyncHelix()
+        platform.http.post.return_value = _ok_response(_JOB_PAYLOAD, status_code=201)
+        publication = PublicationSpec(intake=IntakePublicationSpec(evaluation_id="qwen-garak"))
+
+        GarakPluginResource(platform).submit(config="my-cfg", target="my-tgt", workspace="ws", publication=publication)
+
+        body = platform.http.post.call_args.kwargs["json"]
+        assert body["spec"]["publication"]["intake"] == {
+            "evaluation_id": "qwen-garak",
+            "agent_name": None,
+            "required": True,
+        }
+
+    def test_run_passes_publication_and_the_client_to_the_job(self) -> None:
+        platform = _SyncHelix()
+        job = MagicMock()
+        job.run.return_value = {"status": "completed", "results": {}}
+        publication = PublicationSpec(intake=IntakePublicationSpec(evaluation_id="qwen-garak"))
+        cfg = AuditConfig(name="cfg-1", workspace="default")
+        tgt = AuditTarget(name="tgt-1", workspace="default", type="nim", model="llama")
+
+        with patch("nemo_garak.sdk.AuditJob", return_value=job):
+            GarakPluginResource(platform).run(config=cfg, target=tgt, workspace="default", publication=publication)
+
+        call = job.run.call_args
+        assert call.args[0]["publication"]["intake"]["evaluation_id"] == "qwen-garak"
+        assert call.kwargs["sdk"] is platform
 
     def test_submit_with_inline_entities_serialises_full_dict(self) -> None:
         platform = _SyncHelix()
