@@ -11,3 +11,4 @@ OPENAPI_SPEC_VERSION = "0.0.0"
 
 # Backward-compatible name used by existing service code.
 platform_api_version = OPENAPI_SPEC_VERSION
+# SCRATCH read: one-line Python source change for the AALGO-1325 A/B.
