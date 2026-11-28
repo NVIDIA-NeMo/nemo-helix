@@ -144,6 +144,28 @@ async def ensure_run_evaluation(evaluations: RunEvaluations, workspace: str, run
         raise EvaluationDatasetMismatchError(workspace, run_id)
 
 
+async def check_run_evaluation(
+    evaluations: RunEvaluations, workspace: str, run_id: str, intake: RunIntakePublication
+) -> None:
+    """Refuse what :func:`ensure_run_evaluation` would refuse for run ``run_id``, without creating anything.
+
+    A dry run calls it. An earlier attempt with the same idempotency_key may have left the run's Evaluation behind,
+    and the taskset may have moved on since; with no Evaluation yet, submit would create one, so nothing is refused.
+
+    Raises:
+        ForeignEvaluationError: An Evaluation under the run's name isn't this run's.
+        EvaluationDatasetMismatchError: The run's Evaluation exists with another dataset.
+        NemoClientError: Intake failed.
+    """
+    existing = await evaluations.get(workspace, run_id)
+    if existing is None:
+        return
+    if not _names_run(existing, run_id, intake):
+        raise ForeignEvaluationError(workspace, run_id)
+    if not _same_dataset(existing, intake):
+        raise EvaluationDatasetMismatchError(workspace, run_id)
+
+
 async def stamp_run_evaluation(
     evaluations: RunEvaluations,
     run: TasksetRunEntity,

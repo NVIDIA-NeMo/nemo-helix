@@ -788,23 +788,25 @@ paths:
         \ this workspace's files or jobs can read the copy, even without access to\n\
         the source workspaces.\n\nArgs:\n    workspace: Workspace that owns the run.\n\
         \    req: Validated stored Harbor taskset and execution inputs.\n    response:\
-        \ HTTP response whose status distinguishes acceptance from replay.\n    caller:\
-        \ Effective authenticated principal, supplied by the platform dependency.\n\
+        \ HTTP response whose status distinguishes acceptance from replay.\n    dry_run:\
+        \ Check the submission as submit would, and accept and write nothing.\n  \
+        \  caller: Effective authenticated principal, supplied by the platform dependency.\n\
         \    service: Caller-delegated request-scoped acceptance service.\n\nReturns:\n\
         \    Public run status with advisory notices; 201 for acceptance or 200 for\
         \ replay. Submission starts\n    no task Jobs (the run controller does) and\
         \ no image builds: a task whose image isn't built yet is\n    rejected (422).\
-        \ A keyed replay returns the stored status.\n\nRaises:\n    RequestValidationError:\
-        \ The execution budget exceeds the operator maximum.\n    HTTPException: Source\
-        \ denial (403), conflicting key or Evaluation dataset (409), resolution rejection\n\
-        \        (422), an unavailable image build service before acceptance (503,\
-        \ safe to resend), an Intake\n        Evaluation that couldn't be created\
-        \ before acceptance (503), an Intake Evaluation refused\n        before acceptance\
-        \ (403, not retried), or a sanitized unexpected failure (500).\n        When\
-        \ the request omits idempotency_key, submit generates one. A 5xx then names\
-        \ it in the\n        detail and the ``x-idempotency-key`` header and says\
-        \ not to retry automatically: the SDK\n        would resend the keyless request\
-        \ and accept a second run. Resubmit with that key instead."
+        \ A keyed replay returns the stored status. With ``dry_run``, 200 with what\
+        \ submitting\n    would run (:class:`TasksetRunDryRunResponse`).\n\nRaises:\n\
+        \    RequestValidationError: The execution budget exceeds the operator maximum.\n\
+        \    HTTPException: Source denial (403), conflicting key or Evaluation dataset\
+        \ (409), resolution rejection\n        (422), an unavailable image build service\
+        \ before acceptance (503, safe to resend), an Intake\n        Evaluation that\
+        \ couldn't be created before acceptance (503), an Intake Evaluation refused\n\
+        \        before acceptance (403, not retried), or a sanitized unexpected failure\
+        \ (500).\n        When the request omits idempotency_key, submit generates\
+        \ one. A 5xx then names it in the\n        detail and the ``x-idempotency-key``\
+        \ header and says not to retry automatically: the SDK\n        would resend\
+        \ the keyless request and accept a second run. Resubmit with that key instead."
       operationId: submit_taskset_run_apis_evals_v2_workspaces__workspace__agent_evaluate_runs_post
       parameters:
       - name: workspace
@@ -813,6 +815,24 @@ paths:
         schema:
           type: string
           title: Workspace
+      - name: dry_run
+        in: query
+        required: false
+        schema:
+          type: boolean
+          description: 'Check the submission without accepting it. Every check submit
+            runs is run, and nothing is written: no run, plan, Intake Evaluation,
+            agent layer or copy of a registered agent''s files. If every check passes,
+            returns 200 with the taskset revision the run would pin, its task count
+            and the warnings submitting would give. Otherwise returns the error submit
+            would.'
+          default: false
+          title: Dry Run
+        description: 'Check the submission without accepting it. Every check submit
+          runs is run, and nothing is written: no run, plan, Intake Evaluation, agent
+          layer or copy of a registered agent''s files. If every check passes, returns
+          200 with the taskset revision the run would pin, its task count and the
+          warnings submitting would give. Otherwise returns the error submit would.'
       requestBody:
         required: true
         content:
@@ -827,11 +847,16 @@ paths:
               schema:
                 $ref: '#/components/schemas/TasksetRunSubmitResponse'
         '200':
-          description: Replay an identical existing run.
+          description: Replay an identical existing run, or, with dry_run=true, what
+            submitting would run.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/TasksetRunSubmitResponse'
+                anyOf:
+                - $ref: '#/components/schemas/TasksetRunSubmitResponse'
+                - $ref: '#/components/schemas/TasksetRunDryRunResponse'
+                title: Response 200 Submit Taskset Run Apis Evals V2 Workspaces  Workspace  Agent
+                  Evaluate Runs Post
         '403':
           description: Caller lacks permission to access a source or run resource.
         '409':
@@ -9505,6 +9530,32 @@ components:
         \ resolve to, even if the\nsubmitted member names were identical. A **pinned**\
         \ ref is fixed against that too, and is what an\nevaluation needs to stay\
         \ comparable across a ``replace``."
+    TasksetRunDryRunResponse:
+      properties:
+        taskset:
+          type: string
+          title: Taskset
+          description: The taskset revision the run would pin, as `workspace/name#digest`.
+        task_count:
+          type: integer
+          minimum: 1.0
+          title: Task Count
+          description: The tasks the run would run, one task Job each.
+        warnings:
+          items:
+            type: string
+          type: array
+          title: Warnings
+          description: 'What submitting would warn about: this caller''s active runs
+            on the same taskset revision, a run this idempotency_key already accepted,
+            sandbox defaults applied, and what tasks ask for that the run does differently.'
+      type: object
+      required:
+      - taskset
+      - task_count
+      title: TasksetRunDryRunResponse
+      description: 'A submission''s dry run that passed: what submitting it would
+        run. Nothing was accepted or written.'
     TasksetRunInput:
       properties:
         spec:
