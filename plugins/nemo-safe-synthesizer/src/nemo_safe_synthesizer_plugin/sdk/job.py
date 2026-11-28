@@ -20,6 +20,7 @@ from nemo_helix_plugin.client.errors import NemoClientError
 from nemo_helix_plugin.jobs.client import JobsClient
 from nemo_helix_plugin.jobs.schemas import HelixJobLog, HelixJobStatusResponse
 from nemo_helix_plugin.jobs.types import JobLogsQueryParams
+from nemo_safe_synthesizer.config.evaluation_report_data import EvaluationReportData
 from nemo_safe_synthesizer.config.external_results import SafeSynthesizerSummary
 from typing_extensions import Self
 
@@ -136,6 +137,13 @@ class SafeSynthesizerJob:
             name="evaluation-report", job=self._reference(), workspace=self._workspace
         ).read()
         return ReportHtml(html=data.decode("utf-8"))
+
+    def fetch_report_data(self) -> EvaluationReportData:
+        """Fetch the evaluation results as structured data: scores, per-metric results, and column statistics."""
+        data = self._jobs.download_job_result(
+            name="evaluation-report-data", job=self._reference(), workspace=self._workspace
+        ).read()
+        return EvaluationReportData.model_validate_json(data)
 
     def display_report_in_notebook(self, width: str = "100%", height: int = 1000) -> None:
         """Display the evaluation report in a Jupyter notebook."""

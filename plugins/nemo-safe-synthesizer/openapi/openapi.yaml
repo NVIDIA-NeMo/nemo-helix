@@ -135,6 +135,40 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /apis/safe-synthesizer/v2/workspaces/{workspace}/jobs/{job}/results/evaluation-report-data/download:
+    get:
+      tags:
+      - Safe Synthesizer
+      summary: Download Job Result Evaluation-Report-Data
+      operationId: download_job_result_evaluation_report_data_apis_safe_synthesizer_v2_workspaces__workspace__jobs__job__results_evaluation_report_data_download_get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: job
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Job
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EvaluationReportData'
+        '404':
+          description: Not Found
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /apis/safe-synthesizer/v2/workspaces/{workspace}/jobs/{job}/results/evaluation-report/download:
     get:
       tags:
@@ -699,6 +733,274 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
 components:
   schemas:
+    AttackOutcome:
+      properties:
+        grade:
+          type: string
+          title: Grade
+          description: Protection grade, such as 'Poor' or 'Excellent'.
+        count:
+          title: Count
+          description: Attack evaluations with this grade, or null if only percentages
+            exist.
+          nullable: true
+          type: integer
+        percentage:
+          title: Percentage
+          description: Share of attack evaluations with this grade.
+          nullable: true
+          type: number
+      type: object
+      required:
+      - grade
+      - count
+      - percentage
+      title: AttackOutcome
+      description: How many membership inference attack evaluations got one grade.
+    AttributeInferenceMetric:
+      properties:
+        score:
+          allOf:
+          - $ref: '#/components/schemas/MetricScore'
+          description: The metric's score.
+        columns:
+          items:
+            $ref: '#/components/schemas/ColumnProtection'
+          type: array
+          title: Columns
+          description: Columns from least to most protected.
+      type: object
+      required:
+      - score
+      - columns
+      title: AttributeInferenceMetric
+      description: Attribute inference protection, with the protection of each column.
+    AutocorrelationCounts:
+      properties:
+        groups:
+          type: integer
+          title: Groups
+          description: Groups evaluated.
+        shared_groups:
+          type: integer
+          title: Shared Groups
+          description: Groups in both the training and synthetic data.
+        omitted_shared_groups:
+          type: integer
+          title: Omitted Shared Groups
+          description: Shared groups left out by sampling.
+        columns:
+          type: integer
+          title: Columns
+          description: Columns evaluated.
+        evaluated_profiles:
+          type: integer
+          title: Evaluated Profiles
+          description: Group and column pairs compared.
+        skipped:
+          type: integer
+          title: Skipped
+          description: Group and column pairs left out.
+      type: object
+      required:
+      - groups
+      - shared_groups
+      - omitted_shared_groups
+      - columns
+      - evaluated_profiles
+      - skipped
+      title: AutocorrelationCounts
+      description: How many groups, columns, and pairs were compared.
+    AutocorrelationDetails:
+      properties:
+        evaluation_mode:
+          allOf:
+          - $ref: '#/components/schemas/AutocorrelationEvaluationMode'
+          description: '''per_group'' or ''global'', or null when no pair could be
+            compared.'
+          nullable: true
+        timestamp_column:
+          title: Timestamp Column
+          description: Column the values are ordered by, or null.
+          nullable: true
+          type: string
+        group_column:
+          title: Group Column
+          description: Column that separates sequences, or null.
+          nullable: true
+          type: string
+        max_lag:
+          title: Max Lag
+          description: Configured largest lag, or null.
+          nullable: true
+          type: integer
+        min_points:
+          title: Min Points
+          description: Configured fewest values a sequence needs, or null.
+          nullable: true
+          type: integer
+        counts:
+          allOf:
+          - $ref: '#/components/schemas/AutocorrelationCounts'
+          description: Counts, or null.
+          nullable: true
+        group_selection:
+          allOf:
+          - $ref: '#/components/schemas/GroupSelection'
+          description: Group selection, or null.
+          nullable: true
+        per_group:
+          items:
+            $ref: '#/components/schemas/GroupSimilarity'
+          type: array
+          title: Per Group
+          description: Similarity by group.
+        per_column:
+          items:
+            $ref: '#/components/schemas/ColumnSimilarity'
+          type: array
+          title: Per Column
+          description: Similarity by column.
+        profiles:
+          items:
+            $ref: '#/components/schemas/AutocorrelationProfile'
+          type: array
+          title: Profiles
+          description: Compared group and column pairs.
+        skipped:
+          items:
+            $ref: '#/components/schemas/SkippedComparison'
+          type: array
+          title: Skipped
+          description: Group and column pairs left out, at most the first 12 the report
+            lists; `counts.skipped` is the total.
+        excluded_columns:
+          items:
+            type: string
+          type: array
+          title: Excluded Columns
+          description: Numeric training columns left out because the synthetic data
+            lacks them or has non-numeric values.
+        groups_only_in_training_count:
+          type: integer
+          title: Groups Only In Training Count
+          description: Groups found only in the training data.
+        groups_only_in_synthetic_count:
+          type: integer
+          title: Groups Only In Synthetic Count
+          description: Groups found only in the synthetic data.
+      type: object
+      required:
+      - evaluation_mode
+      - timestamp_column
+      - group_column
+      - max_lag
+      - min_points
+      - counts
+      - group_selection
+      - per_group
+      - per_column
+      - profiles
+      - skipped
+      - excluded_columns
+      - groups_only_in_training_count
+      - groups_only_in_synthetic_count
+      title: AutocorrelationDetails
+      description: Autocorrelation profiles and summaries; null or empty where the
+        metric stopped before them.
+    AutocorrelationEvaluationMode:
+      type: string
+      enum:
+      - per_group
+      - global
+      title: AutocorrelationEvaluationMode
+      description: Whether autocorrelation is compared per group or over one global
+        sequence.
+    AutocorrelationProfile:
+      properties:
+        group:
+          title: Group
+          description: Group label, or null for one global sequence.
+          nullable: true
+          type: string
+        column:
+          type: string
+          title: Column
+          description: Column name.
+        lags:
+          items:
+            type: integer
+          type: array
+          title: Lags
+          description: Lags compared, from 1 to `effective_max_lag`.
+        effective_max_lag:
+          type: integer
+          title: Effective Max Lag
+          description: Largest lag, capped at half the shorter sequence.
+        evaluated_lags:
+          type: integer
+          title: Evaluated Lags
+          description: Lags with enough value pairs in both sequences; 0 when the
+            synthetic sequence is constant.
+        error:
+          type: number
+          title: Error
+          description: Share of the lag structure that differs beyond sampling noise,
+            from 0 to 1.
+        similarity:
+          type: number
+          title: Similarity
+          description: 1 minus `error`.
+        reason:
+          title: Reason
+          description: Why the pair scores 0, such as a constant synthetic sequence,
+            or null.
+          nullable: true
+          type: string
+        training_acf:
+          items:
+            nullable: true
+            type: number
+          type: array
+          title: Training Acf
+          description: Training autocorrelation per lag, or null where undefined.
+        synthetic_acf:
+          items:
+            nullable: true
+            type: number
+          type: array
+          title: Synthetic Acf
+          description: Synthetic autocorrelation per lag, or null where undefined.
+      type: object
+      required:
+      - group
+      - column
+      - lags
+      - effective_max_lag
+      - evaluated_lags
+      - error
+      - similarity
+      - reason
+      - training_acf
+      - synthetic_acf
+      title: AutocorrelationProfile
+      description: Training and synthetic autocorrelation of one column in one group.
+    AutocorrelationSimilarityMetric:
+      properties:
+        score:
+          allOf:
+          - $ref: '#/components/schemas/MetricScore'
+          description: The metric's score.
+        details:
+          allOf:
+          - $ref: '#/components/schemas/AutocorrelationDetails'
+          description: Profiles, skipped pairs, and summaries.
+      type: object
+      required:
+      - score
+      - details
+      title: AutocorrelationSimilarityMetric
+      description: Autocorrelation similarity, with the profiles it compares.
     AutocorrelationSimilarityParameters:
       properties:
         value_columns:
@@ -744,97 +1046,300 @@ components:
         constant synthetic profile paired with varying training data receives zero
 
         similarity.'
-    ClassifyConfig:
+    ClosestMatch:
       properties:
-        enable_classify:
-          title: Enable Classify
-          description: Enable column classification.
+        distance:
+          title: Distance
+          description: Euclidean distance between the windows after standardizing
+            each value by the training windows, or null when it overflows.
+          nullable: true
+          type: number
+        exact_copy:
           type: boolean
-        entities:
-          title: Entities
-          description: List of entity types to classify.
+          title: Exact Copy
+          description: Whether the synthetic window copies the training window exactly.
+        synthetic_values:
+          items:
+            items:
+              type: number
+            type: array
+          type: array
+          title: Synthetic Values
+          description: Synthetic window values, as `values[column][step]`.
+        training_values:
+          title: Training Values
+          description: Training window values, as `values[column][step]`, only for
+            an exact copy so the data holds no training values that the synthetic
+            data lacks; null otherwise.
+          nullable: true
+          items:
+            items:
+              type: number
+            type: array
+          type: array
+      type: object
+      required:
+      - distance
+      - exact_copy
+      - synthetic_values
+      - training_values
+      title: ClosestMatch
+      description: The synthetic window closest to any training window.
+    ColumnPIIStatistics:
+      properties:
+        assigned_type:
+          title: Assigned Type
+          description: Column type assigned by PII detection.
+          nullable: true
+          type: string
+        assigned_entity:
+          title: Assigned Entity
+          description: Entity assigned to the column.
+          nullable: true
+          type: string
+        detected_entity_counts:
+          additionalProperties:
+            type: integer
+          type: object
+          title: Detected Entity Counts
+          description: Times each entity type was detected.
+        is_transformed:
+          type: boolean
+          title: Is Transformed
+          description: Whether the column was transformed.
+        transform_functions:
           items:
             type: string
           type: array
-        num_samples:
-          title: Num Samples
-          description: Number of column values to sample for classification.
-          default: 3
-          type: integer
-        classify_model_provider:
-          title: Classify Model Provider
-          description: Name of the model provider in the Inference Gateway for column
-            classification. The job compiler will resolve this to the appropriate
-            endpoint URL.
-          type: string
+          title: Transform Functions
+          description: Transforms applied to the column, sorted.
       type: object
-      title: ClassifyConfig
-      description: Configuration for column classification using an LLM.
-    Column:
+      required:
+      - assigned_type
+      - assigned_entity
+      - detected_entity_counts
+      - is_transformed
+      - transform_functions
+      title: ColumnPIIStatistics
+      description: PII detected in a training column and how it was replaced.
+    ColumnProfile:
+      properties:
+        type:
+          type: string
+          title: Type
+          description: Inferred column type, such as 'numeric', 'categorical', or
+            'text'.
+        count:
+          type: integer
+          title: Count
+          description: Non-null values.
+        unique_count:
+          type: integer
+          title: Unique Count
+          description: Distinct non-null values.
+        unique_percent:
+          title: Unique Percent
+          description: Distinct values as a percentage of non-null values.
+          nullable: true
+          type: number
+        missing_count:
+          type: integer
+          title: Missing Count
+          description: Null values.
+        missing_percent:
+          title: Missing Percent
+          description: Null values as a percentage of all values.
+          nullable: true
+          type: number
+        avg_str_length:
+          type: number
+          title: Avg Str Length
+          description: Mean length of the values as strings, or 0 without values.
+      type: object
+      required:
+      - type
+      - count
+      - unique_count
+      - unique_percent
+      - missing_count
+      - missing_percent
+      - avg_str_length
+      title: ColumnProfile
+      description: Summary statistics of one column in one dataset.
+    ColumnProtection:
+      properties:
+        column:
+          type: string
+          title: Column
+          description: Column name.
+        protection:
+          title: Protection
+          description: Protection from 0 to 10; higher is better.
+          nullable: true
+          type: number
+        grade:
+          type: string
+          title: Grade
+          description: Protection grade.
+      type: object
+      required:
+      - column
+      - protection
+      - grade
+      title: ColumnProtection
+      description: Attribute inference protection of one column.
+    ColumnResult:
       properties:
         name:
+          type: string
           title: Name
           description: Column name.
-          type: string
-        position:
-          anyOf:
-          - type: integer
-          - items:
-              type: integer
-            type: array
-          title: Position
-          description: Column position.
-        condition:
-          title: Condition
-          description: Column condition.
-          type: string
-        value:
-          title: Value
-          description: Rename to value.
-          type: string
-        entity:
-          anyOf:
-          - type: string
-          - items:
-              type: string
-            type: array
-          title: Entity
-          description: Column entity match.
-        type:
-          anyOf:
-          - type: string
-          - items:
-              type: string
-            type: array
-          title: Type
-          description: Column type match.
+        training:
+          allOf:
+          - $ref: '#/components/schemas/ColumnProfile'
+          description: Training column statistics.
+        synthetic:
+          allOf:
+          - $ref: '#/components/schemas/ColumnProfile'
+          description: Synthetic column statistics.
+        distribution_distance:
+          title: Distribution Distance
+          description: Jensen-Shannon distance between the distributions.
+          nullable: true
+          type: number
+        distribution_stability:
+          allOf:
+          - $ref: '#/components/schemas/MetricScore'
+          description: Distribution stability of the column.
+          nullable: true
+        distribution:
+          allOf:
+          - $ref: '#/components/schemas/Distribution'
+          description: Training and synthetic distributions, or null for columns that
+            are not charted, such as text.
+          nullable: true
+        pii:
+          allOf:
+          - $ref: '#/components/schemas/ColumnPIIStatistics'
+          description: PII statistics, or null without PII detection.
+          nullable: true
       type: object
-      title: Column
-      description: Rule matcher for selecting columns by name, position, condition,
-        entity, or type.
-    ColumnActions:
+      required:
+      - name
+      - training
+      - synthetic
+      - distribution_distance
+      - distribution_stability
+      - distribution
+      - pii
+      title: ColumnResult
+      description: Statistics and distribution stability of one training column.
+    ColumnSimilarity:
       properties:
-        add:
-          title: Add
-          description: Columns to add.
-          items:
-            $ref: '#/components/schemas/Column'
-          type: array
-        drop:
-          title: Drop
-          description: Columns to drop.
-          items:
-            $ref: '#/components/schemas/Column'
-          type: array
-        rename:
-          title: Rename
-          description: Columns to rename.
-          items:
-            $ref: '#/components/schemas/Column'
-          type: array
+        column:
+          type: string
+          title: Column
+          description: Column name.
+        similarity:
+          type: number
+          title: Similarity
+          description: Mean pair similarity from 0 to 1.
+        count:
+          type: integer
+          title: Count
+          description: Pairs compared.
       type: object
-      title: ColumnActions
-      description: Container for column add, drop, and rename operations.
+      required:
+      - column
+      - similarity
+      - count
+      title: ColumnSimilarity
+      description: Mean similarity of the compared pairs in one column.
+    ConditioningColumn:
+      properties:
+        column_name:
+          type: string
+          title: Column Name
+          description: Existing dataframe column that supplies the conditioning value.
+        entity_type:
+          allOf:
+          - $ref: '#/components/schemas/EntityType'
+          description: 'Entity this conditioning column holds. Required for read-only
+            conditioners. Optional when this column_name is also in columns_to_replace:
+            it is filled in from that entry''s entity_type, and an explicit value
+            must match it.'
+      type: object
+      required:
+      - column_name
+      title: ConditioningColumn
+      description: "An existing column that conditions the replacement of another\
+        \ column.\n\n``entity_type`` is required for read-only conditioners (``gender``,\n\
+        ``ethnic_background``, ``city``, \u2026) that are not listed under\n``columns_to_replace``.\n\
+        \nWhen the conditioner is itself a replace target (e.g. email depends on\n\
+        ``first_name``), ``entity_type`` may be omitted: the plan fills it in from\
+        \ that\ncolumn's entry, and an explicit value must match it. Downstream nodes\
+        \ see the\ncell after upstream replacements."
+    CorrelationMatrices:
+      properties:
+        columns:
+          items:
+            type: string
+          type: array
+          title: Columns
+          description: Column names.
+        training:
+          items:
+            items:
+              nullable: true
+              type: number
+            type: array
+          type: array
+          title: Training
+          description: Training correlations, or null where undefined.
+        synthetic:
+          items:
+            items:
+              nullable: true
+              type: number
+            type: array
+          type: array
+          title: Synthetic
+          description: Synthetic correlations, or null where undefined.
+        difference:
+          items:
+            items:
+              nullable: true
+              type: number
+            type: array
+          type: array
+          title: Difference
+          description: Absolute difference of the two, or null where undefined.
+      type: object
+      required:
+      - columns
+      - training
+      - synthetic
+      - difference
+      title: CorrelationMatrices
+      description: Pairwise column correlations, with rows and columns in the order
+        of ``columns``.
+    CorrelationMetric:
+      properties:
+        score:
+          allOf:
+          - $ref: '#/components/schemas/MetricScore'
+          description: The metric's score.
+        correlations:
+          allOf:
+          - $ref: '#/components/schemas/CorrelationMatrices'
+          description: Correlation matrices, or null if not computed.
+          nullable: true
+      type: object
+      required:
+      - score
+      - correlations
+      title: CorrelationMetric
+      description: Column correlation stability, with the correlations it compares.
     DataParameters:
       properties:
         group_training_examples_by:
@@ -883,6 +1388,48 @@ components:
       title: DataParameters
       description: Configuration for grouping, ordering, and splitting input data
         for training and evaluation.
+    DatasetCounts:
+      properties:
+        training_rows:
+          type: integer
+          title: Training Rows
+          description: Training rows evaluated.
+        training_cols:
+          type: integer
+          title: Training Cols
+          description: Training columns evaluated.
+        training_missing_percent:
+          type: number
+          title: Training Missing Percent
+          description: Percentage of missing training values.
+        synthetic_rows:
+          type: integer
+          title: Synthetic Rows
+          description: Synthetic rows evaluated.
+        synthetic_cols:
+          type: integer
+          title: Synthetic Cols
+          description: Synthetic columns evaluated.
+        synthetic_missing_percent:
+          type: number
+          title: Synthetic Missing Percent
+          description: Percentage of missing synthetic values.
+        memorized_lines:
+          type: integer
+          title: Memorized Lines
+          description: Training rows duplicated in the synthetic data.
+      type: object
+      required:
+      - training_rows
+      - training_cols
+      - training_missing_percent
+      - synthetic_rows
+      - synthetic_cols
+      - synthetic_missing_percent
+      - memorized_lines
+      title: DatasetCounts
+      description: Row, column, and missing-value counts for the training and synthetic
+        data.
     DatetimeFilter:
       additionalProperties: false
       properties:
@@ -898,6 +1445,25 @@ components:
           type: string
       title: DatetimeFilter
       type: object
+    DeepStructureMetric:
+      properties:
+        score:
+          allOf:
+          - $ref: '#/components/schemas/MetricScore'
+          description: The metric's score.
+        projection:
+          allOf:
+          - $ref: '#/components/schemas/Projection'
+          description: Projected records, sampled to at most 5000 per dataset, or
+            null if not computed.
+          nullable: true
+      type: object
+      required:
+      - score
+      - projection
+      title: DeepStructureMetric
+      description: Deep structure stability, with the principal component projection
+        it compares.
     DifferentialPrivacyHyperparams:
       properties:
         dp_enabled:
@@ -939,6 +1505,107 @@ components:
         noise
 
         during training.'
+    DifferentialPrivacySettings:
+      properties:
+        enabled:
+          type: boolean
+          title: Enabled
+          description: Whether training used differential privacy.
+        epsilon:
+          title: Epsilon
+          description: Privacy budget, or null when disabled.
+          nullable: true
+          type: number
+        delta:
+          anyOf:
+          - type: number
+          - type: string
+          title: Delta
+          description: Privacy delta, 'auto', or null when disabled.
+          nullable: true
+      type: object
+      required:
+      - enabled
+      - epsilon
+      - delta
+      title: DifferentialPrivacySettings
+      description: Differential privacy settings of the training run.
+    Distribution:
+      properties:
+        labels:
+          items:
+            type: string
+          type: array
+          title: Labels
+          description: Category names, with categories under 5 training records folded
+            into one 'Other (N categories)' label ('Other (1 category)' for one),
+            or bin labels such as '[0, 10)', or '3' for a one-value bin.
+        bin_edges:
+          title: Bin Edges
+          description: For numeric values, the increasing bin edges, one more than
+            the labels; null for categories.
+          nullable: true
+          items:
+            type: number
+          type: array
+        training_percent:
+          items:
+            nullable: true
+            type: number
+          type: array
+          title: Training Percent
+          description: Percentage of training values per label, or null where undefined.
+        synthetic_percent:
+          items:
+            nullable: true
+            type: number
+          type: array
+          title: Synthetic Percent
+          description: Percentage of synthetic values per label, or null where undefined.
+      type: object
+      required:
+      - labels
+      - bin_edges
+      - training_percent
+      - synthetic_percent
+      title: Distribution
+      description: Percentage of training and synthetic values in each category or
+        bin.
+    EntityType:
+      type: string
+      enum:
+      - first_name
+      - middle_name
+      - last_name
+      - full_name
+      - email
+      - phone_number
+      - date_of_birth
+      - street_address
+      - national_id
+      - credit_debit_card
+      - api_key
+      - ipv4
+      - ipv6
+      - unique_identifier
+      - free_text
+      - date
+      - gender
+      - ethnic_background
+      - city
+      - state
+      - zipcode
+      - country
+      - organization
+      title: EntityType
+      description: 'Closed vocabulary for discovery and plan ``entity_type`` fields.
+
+
+        ``FREE_TEXT`` marks columns whose accepted PII spans are detected by
+
+        GLiNER2 and applicable deterministic regex rules, then replaced without
+
+        changing the surrounding text.'
     EvaluationParameters:
       properties:
         mia_enabled:
@@ -1017,11 +1684,175 @@ components:
         It includes privacy attack evaluations, statistical quality metrics, and downstream
 
         machine learning performance assessments.'
+    EvaluationReportData:
+      properties:
+        schema_version:
+          type: integer
+          title: Schema Version
+          description: Schema version; readers accept higher versions.
+        library_version:
+          type: string
+          title: Library Version
+          description: nemo-safe-synthesizer version that built the data.
+        job_id:
+          title: Job Id
+          description: Job ID from the NEMO_JOB_ID environment variable, or null.
+          nullable: true
+          type: string
+        scores:
+          $ref: '#/components/schemas/Scores'
+        metrics:
+          allOf:
+          - $ref: '#/components/schemas/Metrics'
+          description: Per-metric results.
+        dataset:
+          allOf:
+          - $ref: '#/components/schemas/DatasetCounts'
+          description: Dataset counts, or null when they were not computed.
+          nullable: true
+        columns:
+          items:
+            $ref: '#/components/schemas/ColumnResult'
+          type: array
+          title: Columns
+          description: 'Evaluated training columns, in training order: those also
+            in the synthetic data, sampled down to `evaluation.sqs_report_columns`.'
+        any_column_transformed:
+          type: boolean
+          title: Any Column Transformed
+          description: Whether PII replacement transformed any training column, including
+            ones not in `columns`.
+        differential_privacy:
+          allOf:
+          - $ref: '#/components/schemas/DifferentialPrivacySettings'
+          description: Differential privacy settings.
+        pii_replacement:
+          allOf:
+          - $ref: '#/components/schemas/PIIReplacement'
+          description: PII replacement applied to the training data, or null when
+            none was applied or checked.
+          nullable: true
+      type: object
+      required:
+      - schema_version
+      - library_version
+      - job_id
+      - scores
+      - metrics
+      - dataset
+      - columns
+      - any_column_transformed
+      - differential_privacy
+      - pii_replacement
+      title: EvaluationReportData
+      description: 'Evaluation results, including everything the HTML report shows.
+
+
+        Metric keys match the scores in ``SafeSynthesizerSummary``.'
     FileStorageType:
       type: string
       enum:
       - fileset
       title: FileStorageType
+    FreeTextDetectionConfig:
+      properties:
+        model_id:
+          type: string
+          minLength: 1
+          title: Model Id
+          description: GLiNER2 model identifier used to detect PII spans in free-text
+            columns. Must be nonempty.
+          default: fastino/gliner2-privacy-filter-PII-multi
+        model_revision:
+          title: Model Revision
+          description: Hugging Face revision (commit, branch, or tag) of model_id
+            to load. Defaults to the commit of the default model that the default
+            thresholds were tuned on. When model_id is changed and model_revision
+            is not set, the latest revision is loaded. Set null to load the latest
+            revision.
+          default: c153999da5f4c509df4322b0c6a1baf3d2c284d7
+          type: string
+          minLength: 1
+        entity_thresholds:
+          additionalProperties:
+            type: number
+            maximum: 1.0
+            minimum: 0.0
+          propertyNames:
+            $ref: '#/components/schemas/EntityType'
+          type: object
+          title: Entity Thresholds
+          description: 'Minimum GLiNER2 confidence score per entity type. Entity types
+            left out use the defaults: 0.944 for first_name; 0.7 for middle_name;
+            0.614 for last_name; 0.963 for full_name; 0.992 for phone_number; 0.9998
+            for date_of_birth; 0.987 for street_address; 0.979 for national_id; 0.991
+            for api_key; and 0.946 for unique_identifier. Email, credit_debit_card,
+            ipv4, and ipv6 are detected by regex and take no threshold.'
+        checked_national_id_threshold:
+          type: number
+          maximum: 1.0
+          minimum: 0.0
+          title: Checked National Id Threshold
+          description: Minimum GLiNER2 confidence score for a detected national ID
+            that python-stdnum accepts as a personal ID of replace_pii.locale's country,
+            such as a US Social Security number for en_US. It replaces entity_thresholds.national_id
+            for those values, since the check rather than the score tells them apart.
+            Locales without a check, such as en_GB, use only the national_id threshold.
+          default: 0.733
+        name_exclusion_thresholds:
+          additionalProperties:
+            type: number
+            maximum: 1.0
+            minimum: 0.0
+          type: object
+          title: Name Exclusion Thresholds
+          description: Extra GLiNER2 labels, with their minimum confidence, for terms
+            often mistaken for names, such as medical conditions or family relationships.
+            A detected name that overlaps one of these spans is not replaced, and
+            find_and_replace does not replace text inside them. Labels you set are
+            merged into the defaults; set a label to null to drop it, and it stays
+            null in the configuration. Dropping every label turns exclusion off, which
+            finds more real names at the cost of more false names in clinical text.
+        find_and_replace:
+          type: boolean
+          title: Find And Replace
+          description: Search free text for values already known in the same record
+            or group and replace the occurrences the detectors missed. Detected spans
+            reuse a known value's replacement either way; this setting only adds the
+            search. Known values are original values of structured replacement columns,
+            including the words of a plain full name, and values detected elsewhere
+            in free text. Only whole words are matched, ignoring case. Values shorter
+            than three characters, one-word values that are common English words,
+            such as 'Will' or 'Brown', and missing-value placeholders such as 'Unknown'
+            are not searched for, and text inside a name-exclusion span, such as a
+            medical condition, is never replaced this way. Set false to replace only
+            detected spans, for example to measure what the search adds. The search
+            runs only when replace_pii.locale is en_US, because the common-word list
+            is English.
+          default: true
+        batch_size:
+          type: integer
+          exclusiveMinimum: 0.0
+          title: Batch Size
+          description: Number of text chunks processed in one GLiNER2 inference batch.
+            Must be positive.
+          default: 8
+        chunk_length:
+          type: integer
+          exclusiveMinimum: 0.0
+          title: Chunk Length
+          description: Maximum length of each GLiNER2 text chunk. Must be positive.
+          default: 384
+        chunk_overlap:
+          type: integer
+          minimum: 0.0
+          title: Chunk Overlap
+          description: Overlap between adjacent GLiNER2 text chunks. Must be nonnegative
+            and smaller than chunk_length.
+          default: 128
+      type: object
+      title: FreeTextDetectionConfig
+      description: GLiNER2 and deterministic regex settings for free-text PII detection.
     GenerateJob:
       properties:
         id:
@@ -1349,81 +2180,62 @@ components:
 
         They affect the quality, diversity, and validity of the generated synthetic
         records.'
-    GlinerConfig:
+    GroupSelection:
       properties:
-        enable_gliner:
-          type: boolean
-          title: Enable Gliner
-          description: Enable GLiNER NER module.
-          default: true
-        enable_batch_mode:
-          type: boolean
-          title: Enable Batch Mode
-          description: Enable GLiNER batch mode.
-          default: true
-        batch_size:
+        shared_groups:
           type: integer
-          title: Batch Size
-          description: GLiNER batch size.
-          default: 8
-        chunk_length:
+          title: Shared Groups
+          description: Groups in both the training and synthetic data.
+        evaluated_groups:
           type: integer
-          title: Chunk Length
-          description: GLiNER batch chunk length in characters.
-          default: 512
-        gliner_model:
+          title: Evaluated Groups
+          description: Groups evaluated.
+        omitted_shared_groups:
+          type: integer
+          title: Omitted Shared Groups
+          description: Shared groups left out.
+        policy:
+          allOf:
+          - $ref: '#/components/schemas/GroupSelectionPolicy'
+          description: '''all_shared_groups'', or ''seeded_random_sample'' when groups
+            were sampled.'
+      type: object
+      required:
+      - shared_groups
+      - evaluated_groups
+      - omitted_shared_groups
+      - policy
+      title: GroupSelection
+      description: How the evaluated groups were chosen from the shared groups.
+    GroupSelectionPolicy:
+      type: string
+      enum:
+      - all_shared_groups
+      - seeded_random_sample
+      title: GroupSelectionPolicy
+      description: How groups were chosen for autocorrelation similarity.
+    GroupSimilarity:
+      properties:
+        group:
+          title: Group
+          description: Group label, or null for one global sequence.
+          nullable: true
           type: string
-          title: Gliner Model
-          description: GLiNER model name.
-          default: nvidia/gliner-PII
-      type: object
-      title: GlinerConfig
-      description: Configuration for the GLiNER named-entity recognition model.
-    Globals:
-      properties:
-        locales:
-          title: Locales
-          description: List of locales.
-          examples:
-          - en_US
-          items:
-            type: string
-          type: array
-        seed:
-          title: Seed
-          description: Optional random seed.
+        similarity:
+          type: number
+          title: Similarity
+          description: Mean pair similarity from 0 to 1.
+        count:
           type: integer
-          exclusiveMaximum: 2147483647.0
-          exclusiveMinimum: -2147483647.0
-        classify:
-          allOf:
-          - $ref: '#/components/schemas/ClassifyConfig'
-          description: Column classification configuration.
-          default:
-            num_samples: 3
-        ner:
-          allOf:
-          - $ref: '#/components/schemas/NERConfig'
-          description: Named Entity Recognition configuration.
-          default:
-            ner_threshold: 0.3
-            enable_regexps: false
-            gliner:
-              batch_size: 8
-              chunk_length: 512
-              enable_batch_mode: true
-              enable_gliner: true
-              gliner_model: nvidia/gliner-PII
-        lock_columns:
-          title: Lock Columns
-          description: List of columns to preserve as immutable across all transformations.
-          items:
-            type: string
-          type: array
+          title: Count
+          description: Pairs compared.
       type: object
-      title: Globals
-      description: Global settings for the PII replacer including locales, seed, NER,
-        and classification.
+      required:
+      - group
+      - similarity
+      - count
+      title: GroupSimilarity
+      description: Mean similarity of the compared pairs in one group.
     HTTPValidationError:
       properties:
         detail:
@@ -1713,38 +2525,388 @@ components:
         a
 
         control update, an omitted or null value keeps the job''s current value.'
-    NERConfig:
+    LLMConfig:
       properties:
-        ner_threshold:
-          type: number
-          title: Ner Threshold
-          description: NER model threshold.
-          default: 0.3
-        enable_regexps:
-          type: boolean
-          title: Enable Regexps
-          description: Enable NER regular expressions (experimental).
-          default: false
-        gliner:
+        model_id:
+          title: Model Id
+          description: Model identifier for PII inference. When unset, uses NSS_INFERENCE_MODEL.
+            Without an inference endpoint, selects the bundled local vLLM profile
+            and defaults to nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16; with
+            an endpoint, a model ID is required.
+          type: string
+        max_workers:
+          type: integer
+          minimum: 1.0
+          title: Max Workers
+          description: Maximum concurrent requests for LLM-assisted plan discovery.
+            Must be at least 1.
+          default: 8
+      type: object
+      title: LLMConfig
+      description: 'Inference behavior for LLM-assisted PII plan discovery.
+
+
+        Automatic discovery always uses the LLM. Without an endpoint, NSS runs the
+
+        model in a managed local vLLM server. An
+
+        OpenAI-compatible endpoint is supplied at runtime through
+
+        ``NSS_INFERENCE_ENDPOINT`` or ``--inference-endpoint-url`` rather than persisted
+
+        in NSS configuration.'
+    MembershipInferenceMetric:
+      properties:
+        score:
           allOf:
-          - $ref: '#/components/schemas/GlinerConfig'
-          description: GLiNER NER configuration.
-          default:
-            enable_gliner: true
-            enable_batch_mode: true
-            batch_size: 8
-            chunk_length: 512
-            gliner_model: nvidia/gliner-PII
-        ner_entities:
-          title: Ner Entities
-          description: List of entity types to recognize. If unset, classification
-            entity types are used.
+          - $ref: '#/components/schemas/MetricScore'
+          description: The metric's score.
+        outcomes:
+          items:
+            $ref: '#/components/schemas/AttackOutcome'
+          type: array
+          title: Outcomes
+          description: Outcomes from the best grade to the worst.
+        excluded_columns:
           items:
             type: string
           type: array
+          title: Excluded Columns
+          description: Columns left out via `evaluation.mia_excluded_columns`.
       type: object
-      title: NERConfig
-      description: Configuration for Named Entity Recognition.
+      required:
+      - score
+      - outcomes
+      - excluded_columns
+      title: MembershipInferenceMetric
+      description: Membership inference protection, with its attack outcomes and the
+        columns left out of the attack.
+    Metric:
+      properties:
+        score:
+          allOf:
+          - $ref: '#/components/schemas/MetricScore'
+          description: The metric's score.
+      type: object
+      required:
+      - score
+      title: Metric
+      description: A metric's score.
+    MetricScore:
+      properties:
+        raw_score:
+          title: Raw Score
+          description: Unscaled metric value, or null if it could not be computed.
+          nullable: true
+          type: number
+        score:
+          title: Score
+          description: Score from 0 to 10, or null if it could not be computed.
+          nullable: true
+          type: number
+        grade:
+          type: string
+          title: Grade
+          description: Qualitative grade, such as 'Unavailable', 'Poor', 'Good', or
+            'Excellent'.
+        notes:
+          title: Notes
+          description: Warning or error about the score, or null.
+          nullable: true
+          type: string
+      type: object
+      required:
+      - raw_score
+      - score
+      - grade
+      - notes
+      title: MetricScore
+      description: A metric's score and grade.
+    Metrics:
+      properties:
+        column_correlation_stability:
+          allOf:
+          - $ref: '#/components/schemas/CorrelationMetric'
+          description: Column Correlation Stability.
+          nullable: true
+        deep_structure_stability:
+          allOf:
+          - $ref: '#/components/schemas/DeepStructureMetric'
+          description: Deep Structure Stability.
+          nullable: true
+        column_distribution_stability:
+          allOf:
+          - $ref: '#/components/schemas/Metric'
+          description: Column Distribution Stability; each column's distributions
+            are in `columns`.
+          nullable: true
+        text_semantic_similarity:
+          allOf:
+          - $ref: '#/components/schemas/TextSemanticMetric'
+          description: Text Semantic Similarity.
+          nullable: true
+        text_structure_similarity:
+          allOf:
+          - $ref: '#/components/schemas/TextStructureMetric'
+          description: Text Structure Similarity.
+          nullable: true
+        membership_inference_protection:
+          allOf:
+          - $ref: '#/components/schemas/MembershipInferenceMetric'
+          description: Membership Inference Protection.
+          nullable: true
+        attribute_inference_protection:
+          allOf:
+          - $ref: '#/components/schemas/AttributeInferenceMetric'
+          description: Attribute Inference Protection.
+          nullable: true
+        pii_replay:
+          allOf:
+          - $ref: '#/components/schemas/PIIReplayMetric'
+          description: PII Replay.
+          nullable: true
+        autocorrelation_similarity:
+          allOf:
+          - $ref: '#/components/schemas/AutocorrelationSimilarityMetric'
+          description: Autocorrelation Similarity.
+          nullable: true
+        window_membership_inference_protection:
+          allOf:
+          - $ref: '#/components/schemas/WindowMembershipInferenceMetric'
+          description: Window Membership Inference Protection.
+          nullable: true
+      type: object
+      required:
+      - column_correlation_stability
+      - deep_structure_stability
+      - column_distribution_stability
+      - text_semantic_similarity
+      - text_structure_similarity
+      - membership_inference_protection
+      - attribute_inference_protection
+      - pii_replay
+      - autocorrelation_similarity
+      - window_membership_inference_protection
+      title: Metrics
+      description: 'Per-metric results. A metric is null when it is not part of the
+        evaluation; a metric that was turned off or
+
+        could not run is present with an ''Unavailable'' grade.'
+    PIIDependency:
+      properties:
+        column_name:
+          type: string
+          title: Column Name
+          description: Column name.
+        entity_type:
+          title: Entity Type
+          description: Entity type of the column, or null.
+          nullable: true
+          type: string
+      type: object
+      required:
+      - column_name
+      - entity_type
+      title: PIIDependency
+      description: A column whose values a replaced column depends on.
+    PIIReplacement:
+      properties:
+        replaced:
+          type: boolean
+          title: Replaced
+          description: False when PII replacement was off and PII was detected only
+            to check replay.
+        columns:
+          items:
+            $ref: '#/components/schemas/PIIReplacementColumn'
+          type: array
+          title: Columns
+          description: Replaced columns, in training order.
+        kept_columns:
+          items:
+            type: string
+          type: array
+          title: Kept Columns
+          description: Training columns left as they were.
+        sampler:
+          title: Sampler
+          description: Sampler that generated replacement values, or null.
+          nullable: true
+          type: string
+        locale:
+          title: Locale
+          description: Sampler locale, or null.
+          nullable: true
+          type: string
+        seed:
+          title: Seed
+          description: Sampler seed, or null for a random seed.
+          nullable: true
+          type: integer
+        value_mappings:
+          additionalProperties:
+            additionalProperties:
+              items:
+                type: string
+              type: array
+            type: object
+          type: object
+          title: Value Mappings
+          description: '`replace_pii.data_to_sampler_value_mapping`: values in each
+            dependency column mapped to sampler values.'
+      type: object
+      required:
+      - replaced
+      - columns
+      - kept_columns
+      - sampler
+      - locale
+      - seed
+      - value_mappings
+      title: PIIReplacement
+      description: The PII replacement applied to the training data.
+    PIIReplacementColumn:
+      properties:
+        column_name:
+          type: string
+          title: Column Name
+          description: Column name.
+        entity_type:
+          type: string
+          title: Entity Type
+          description: Entity type the column was replaced as.
+        replaced_with:
+          type: string
+          title: Replaced With
+          description: How replacement values were generated.
+        pattern:
+          title: Pattern
+          description: Replacement pattern, or null.
+          nullable: true
+          type: string
+        pattern_symbols:
+          items:
+            $ref: '#/components/schemas/PatternSymbol'
+          type: array
+          title: Pattern Symbols
+          description: The pattern's symbols in order of first use.
+        depends_on:
+          items:
+            $ref: '#/components/schemas/PIIDependency'
+          type: array
+          title: Depends On
+          description: Columns the replacement values depend on.
+        found_by:
+          items:
+            type: string
+          type: array
+          title: Found By
+          description: Free-text detectors that found the replaced values.
+        entity_counts:
+          additionalProperties:
+            type: integer
+          type: object
+          title: Entity Counts
+          description: Times each entity type was found in the column.
+      type: object
+      required:
+      - column_name
+      - entity_type
+      - replaced_with
+      - pattern
+      - pattern_symbols
+      - depends_on
+      - found_by
+      - entity_counts
+      title: PIIReplacementColumn
+      description: How one training column was replaced.
+    PIIReplayEntry:
+      properties:
+        column_name:
+          type: string
+          title: Column Name
+          description: Column name.
+        column_assigned_type:
+          type: string
+          title: Column Assigned Type
+          description: Column type assigned by PII detection.
+        pii_type:
+          type: string
+          title: Pii Type
+          description: PII type, or 'none' for a whole column checked by name.
+        total_training_data:
+          type: integer
+          title: Total Training Data
+          description: Training rows containing a value of this type.
+        unique_training_data:
+          type: integer
+          title: Unique Training Data
+          description: Distinct training values of this type.
+        total_synthetic_data:
+          type: integer
+          title: Total Synthetic Data
+          description: Synthetic rows containing one of the training values.
+        unique_synthetic_data:
+          type: integer
+          title: Unique Synthetic Data
+          description: Distinct training values found in the synthetic data.
+        unique_synthetic_data_percentage:
+          type: number
+          title: Unique Synthetic Data Percentage
+          description: unique_synthetic_data / unique_training_data * 100.
+      type: object
+      required:
+      - column_name
+      - column_assigned_type
+      - pii_type
+      - total_training_data
+      - unique_training_data
+      - total_synthetic_data
+      - unique_synthetic_data
+      - unique_synthetic_data_percentage
+      title: PIIReplayEntry
+      description: Replay counts for one PII type in one column.
+    PIIReplayMetric:
+      properties:
+        score:
+          allOf:
+          - $ref: '#/components/schemas/MetricScore'
+          description: The metric's score.
+        enabled:
+          title: Enabled
+          description: Whether `evaluation.pii_replay_enabled` was on, or null when
+            the evaluation had no configuration.
+          nullable: true
+          type: boolean
+        training_total_records:
+          type: integer
+          title: Training Total Records
+          description: Training rows checked.
+        synthetic_total_records:
+          type: integer
+          title: Synthetic Total Records
+          description: Synthetic rows checked.
+        entries:
+          items:
+            $ref: '#/components/schemas/PIIReplayEntry'
+          type: array
+          title: Entries
+          description: Replay counts per column and PII type.
+        skipped_reason:
+          title: Skipped Reason
+          description: Why PII replay did not run in full, or null.
+          nullable: true
+          type: string
+      type: object
+      required:
+      - score
+      - enabled
+      - training_total_records
+      - synthetic_total_records
+      - entries
+      - skipped_reason
+      title: PIIReplayMetric
+      description: How many training PII values reappear in the synthetic data.
     PaginationData:
       properties:
         page:
@@ -1775,28 +2937,106 @@ components:
       - total_pages
       - total_results
       title: PaginationData
-    PiiReplacerConfig:
+    PatternSymbol:
       properties:
-        globals:
-          allOf:
-          - $ref: '#/components/schemas/Globals'
-          description: Global configuration options.
-        steps:
-          items:
-            $ref: '#/components/schemas/StepDefinition'
-          type: array
-          maxItems: 10
-          minItems: 1
-          title: Steps
-          description: List of transformation steps to perform on input data.
+        symbol:
+          type: string
+          title: Symbol
+          description: The symbol as written in the pattern.
+        meaning:
+          type: string
+          title: Meaning
+          description: What the symbol is replaced with.
       type: object
       required:
-      - steps
-      title: PiiReplacerConfig
-      description: 'Configuration for PII replacer.
-
-
-        Defines how PII data should be detected and replaced in a dataset.'
+      - symbol
+      - meaning
+      title: PatternSymbol
+      description: One symbol of a replacement pattern and what it stands for.
+    PiiColumnPlan:
+      properties:
+        column_name:
+          type: string
+          title: Column Name
+          description: Name of the dataframe column to replace or scan.
+        entity_type:
+          allOf:
+          - $ref: '#/components/schemas/EntityType'
+          description: Entity this column holds. Identify-only entity types are not
+            allowed here.
+        pattern:
+          title: Pattern
+          description: Optional whole-value format using the grammar associated with
+            this entity type. Only entity types that define a pattern syntax may set
+            this. When provided, the whole column is replaced with the pattern if
+            it covers at least 99% of non-null values (checked against the dataframe,
+            not here).
+          type: string
+        depends_on:
+          items:
+            $ref: '#/components/schemas/ConditioningColumn'
+          type: array
+          title: Depends On
+          description: Columns that condition the replacement of this column. Only
+            entity types in ALLOWED_DEPENDS_ON may set this. Can omit ConditioningColumn.entity_type
+            when the conditioner is listed in columns_to_replace. Matrix checks for
+            explicit entity_type run here; omitted types and exclusive-group checks
+            are resolved on PiiReplacementPlan.
+      type: object
+      required:
+      - column_name
+      - entity_type
+      title: PiiColumnPlan
+      description: "Replacement spec for one named column.\n\n``entity_type`` must\
+        \ have action ``REPLACE`` or ``REPLACE_IN_TEXT``, not\n``IDENTIFY_ONLY``.\n\
+        Identify-only types (``date``, ``gender``, ``city``, \u2026) are invalid here.\n\
+        ``depends_on`` is allowed only for types in ``ALLOWED_DEPENDS_ON``."
+    PiiSamplerBackend:
+      type: string
+      enum:
+      - nemotron-personas
+      - faker
+      title: PiiSamplerBackend
+      description: Source of synthetic values for names and related person-like fields.
+    PiiSamplerConfig:
+      properties:
+        backend:
+          allOf:
+          - $ref: '#/components/schemas/PiiSamplerBackend'
+          description: 'Person sampler backend: downloaded Nemotron-Personas assets
+            or Faker.'
+          default: nemotron-personas
+        nemotron_personas_path:
+          title: Nemotron Personas Path
+          description: Root directory containing downloaded Nemotron-Personas files
+            as datasets/{locale}.parquet. Defaults to NSS_NEMOTRON_PERSONAS_PATH or
+            ~/.data-designer/managed-assets.
+          type: string
+      type: object
+      title: PiiSamplerConfig
+      description: Settings for Nemotron-Personas or Faker-backed person sampling.
+    Points:
+      properties:
+        x:
+          items:
+            nullable: true
+            type: number
+          type: array
+          title: X
+          description: First principal component of each point, or null where undefined.
+        y:
+          items:
+            nullable: true
+            type: number
+          type: array
+          title: Y
+          description: Second principal component of each point, or null where undefined.
+      type: object
+      required:
+      - x
+      - y
+      title: Points
+      description: Points on the first two principal components.
     PreflightParameters:
       properties:
         disabled_checks:
@@ -1809,6 +3049,31 @@ components:
       type: object
       title: PreflightParameters
       description: User-controllable overrides for the preflight validation layer.
+    Projection:
+      properties:
+        axes:
+          items:
+            type: string
+          type: array
+          title: Axes
+          description: Names of the two components, such as 'pc1', with any explained
+            variance.
+        training:
+          allOf:
+          - $ref: '#/components/schemas/Points'
+          description: Training records.
+        synthetic:
+          allOf:
+          - $ref: '#/components/schemas/Points'
+          description: Synthetic records.
+      type: object
+      required:
+      - axes
+      - training
+      - synthetic
+      title: Projection
+      description: Training and synthetic records projected onto the same two principal
+        components.
     QuantizationScheme:
       type: string
       enum:
@@ -1824,79 +3089,143 @@ components:
         \ ``quantization_config`` object; optional ML dependencies stay\nlocally imported\
         \ in that construction path.\n\nSelection guide:\n- ``bnb-4bit`` / ``bnb-8bit``:\
         \ bitsandbytes NF4 / int8. Widest hardware\n  support (Ampere+), works with\
-        \ QLoRA and LoftQ. Default for training.\n- ``fp8``: transformers ``FineGrainedFP8Config``.\
+        \ QLoRA and LoftQ. ``bnb-8bit`` is the default.\n- ``fp8``: transformers ``FineGrainedFP8Config``.\
         \ Float8 with block-wise\n  scaling. Requires Hopper (sm_90+) or Blackwell.\
         \ Inference-leaning.\n- ``nvfp4``: NVIDIA FP4 via ``torchao.prototype.mx_formats.NVFP4WeightOnlyConfig``\n\
         \  wrapped in ``TorchAoConfig``. Requires Blackwell (sm_100+). Weight-only.\n\
         - ``mxfp4``: OCP Microscaling FP4 via transformers ``Mxfp4Config``.\n  Hardware\
         \ support varies by torch/torchao version."
-    Row:
+    ReplacePiiConfigInput:
       properties:
-        name:
+        schema_version:
+          type: integer
+          const: 3
+          title: Schema Version
+          description: Version of this replace_pii configuration schema. Missing versions
+            are treated as version 3; this release accepts only version 3.
+          default: 3
+        locale:
+          type: string
+          title: Locale
+          description: Locale for generated names and addresses, for reading phone
+            numbers written without a country code, and of the Nemotron-Personas dataset
+            (datasets/{locale}.parquet).
+          default: en_US
+        seed:
+          title: Seed
+          description: Seed for synthetic value generation. When unset, each run draws
+            a random seed and saves it in the resolved configuration. Anyone who knows
+            the seed can test guesses for original values in the replaced data, so
+            keep a configuration that contains it as private as the input data.
+          type: integer
+        sampler:
+          allOf:
+          - $ref: '#/components/schemas/PiiSamplerConfig'
+          description: 'Sampler that generates names and addresses: Nemotron-Personas
+            or Faker. When sampler is not set, NSS uses Nemotron-Personas, or Faker
+            with a warning when the Nemotron-Personas data for locale is missing and
+            the plan maps no ethnicity values. A relative nemotron_personas_path is
+            resolved against the directory of the configuration file.'
+        replacement_plan:
           anyOf:
+          - properties:
+              columns_to_replace:
+                items:
+                  $ref: '#/components/schemas/PiiColumnPlan'
+                type: array
+                title: Columns To Replace
+                description: Columns to replace or (for free_text) scan for PII spans
+                  to rewrite.
+              data_to_sampler_value_mapping:
+                additionalProperties:
+                  additionalProperties:
+                    items:
+                      type: string
+                    type: array
+                  type: object
+                type: object
+                title: Data To Sampler Value Mapping
+                description: 'Maps dataset values in depends_on columns to the values
+                  used by replace_pii.sampler. Unlike most NSS settings, all matching
+                  here ignores case: dataset values, mapping keys, and sampler values,
+                  so Female, female, and FEMALE are the same value. For example, {sex:
+                  {Woman: [female], Non-binary: [female, male]}} makes rows where
+                  sex is Woman sample a female persona and rows where sex is Non-binary
+                  sample either. Gender values are female and male for every sampler;
+                  Nemotron-Personas also accepts its locale''s own words, such as
+                  femme in fr_FR. Ethnicity values need Nemotron-Personas in a locale
+                  with ethnicity data. A dataset value without an entry is looked
+                  up in the sampler as is; a value that has no entry and matches no
+                  sampler value is an error. When replace_pii.replacement_plan is
+                  ''auto_discovery'', NSS generates this mapping for you.'
+            type: object
+            title: PiiReplacementPlan
+            description: 'Dataset-specific replacement plan: the part of ``replace_pii``
+              a person reviews.
+
+
+              ``data_to_sampler_value_mapping`` targets the values of ``replace_pii.sampler``
+
+              in ``replace_pii.locale``, so a plan is checked against the sampler
+              of each
+
+              run that uses it. ``columns_to_replace`` is a flat list whose
+
+              cross-column relationships are ``depends_on`` edges (a DAG). Context-free
+
+              dependency and graph checks are enforced here; plan-vs-dataframe checks
+
+              live in ``pii_replacer.planning.validation``.'
           - type: string
-          - items:
-              type: string
-            type: array
-          title: Name
-          description: Row name.
-        condition:
-          title: Condition
-          description: Row condition match.
-          type: string
-        foreach:
-          title: Foreach
-          description: Foreach expression.
-          type: string
-        value:
-          title: Value
-          description: Row value definition.
-          type: string
-        entity:
-          anyOf:
-          - type: string
-          - items:
-              type: string
-            type: array
-          title: Entity
-          description: Row entity match.
-        type:
-          anyOf:
-          - type: string
-          - items:
-              type: string
-            type: array
-          title: Type
-          description: Row type match.
-        fallback_value:
-          title: Fallback Value
-          description: Row fallback value.
-          type: string
-        description:
-          title: Description
-          description: Rule description for human consumption.
-          type: string
+          title: Replacement Plan
+          description: '''auto_discovery'' to discover the plan from the data; an
+            inline plan; or the path of a YAML plan file. A relative path is resolved
+            against the directory of the configuration file.'
+          default: auto_discovery
+        llm:
+          allOf:
+          - $ref: '#/components/schemas/LLMConfig'
+          description: Inference behavior for LLM-assisted plan discovery; the defaults
+            run a local vLLM server. The endpoint is configured at runtime through
+            NSS_INFERENCE_ENDPOINT or --inference-endpoint-url. An inline plan makes
+            no LLM request.
+        free_text_detection:
+          allOf:
+          - $ref: '#/components/schemas/FreeTextDetectionConfig'
+          description: GLiNER2 and deterministic built-in regex settings for detecting
+            PII spans in free-text columns.
       type: object
-      title: Row
-      description: Rule matcher for selecting rows by name, condition, entity, or
-        type.
-    RowActions:
-      properties:
-        drop:
-          title: Drop
-          description: Rows to drop.
-          items:
-            $ref: '#/components/schemas/Row'
-          type: array
-        update:
-          title: Update
-          description: Rows to update.
-          items:
-            $ref: '#/components/schemas/Row'
-          type: array
-      type: object
-      title: RowActions
-      description: Container for row drop and update operations.
+      title: ReplacePiiConfigInput
+      description: 'Top-level ``replace_pii`` config.
+
+
+        ``replacement_plan`` holds what a person reviews: the columns to replace
+
+        and the value mapping. It is ``"auto_discovery"`` (the default), an inline
+
+        plan, or the path of a YAML plan file, resolved relative to the
+
+        configuration file that names it. ``locale``, ``seed``, and ``sampler``
+
+        configure generation; a plan''s value mapping is checked against the
+
+        ``sampler`` and ``locale`` of each run. ``llm`` and ``free_text_detection``
+
+        configure how NSS finds PII.
+
+
+        Auto-discovery classifies columns with the LLM configured by ``llm``, which
+
+        defaults to the NSS inference defaults. An inline plan bypasses discovery,
+
+        so it makes no LLM request; that is the way to replace PII without an LLM.
+
+        The API key remains a runtime secret supplied through ``NSS_INFERENCE_KEY``
+
+        or the corresponding CLI option; it is never stored in this model.
+
+
+        v2 fields ``globals`` and ``steps`` are rejected with a removal error.'
     SafeSynthesizerJobConfig:
       properties:
         data_source:
@@ -1964,7 +3293,7 @@ components:
             currently experimental.
         replace_pii:
           allOf:
-          - $ref: '#/components/schemas/PiiReplacerConfig'
+          - $ref: '#/components/schemas/ReplacePiiConfigInput'
           description: PII replacement configuration. When ``None``, PII replacement
             is skipped.
         preflight:
@@ -2008,105 +3337,135 @@ components:
           title: Synthetic Data Quality Score
           description: Weighted composite of the five sub-scores below (SQS). Higher
             is better (0--10 scale).
+          nullable: true
           type: number
         column_correlation_stability_score:
           title: Column Correlation Stability Score
           description: How closely pairwise column correlations in synthetic data
             match the original for numeric and categorical columns.
+          nullable: true
           type: number
         deep_structure_stability_score:
           title: Deep Structure Stability Score
           description: PCA-based comparison of multivariate structure between real
             and synthetic data for numeric and categorical columns.
+          nullable: true
           type: number
         column_distribution_stability_score:
           title: Column Distribution Stability Score
           description: Per-column Jensen-Shannon distance between training and synthetic
             distributions averaged across all numeric and categorical columns.
+          nullable: true
           type: number
         text_semantic_similarity_score:
           title: Text Semantic Similarity Score
           description: Embedding-based semantic closeness between real and synthetic
             free-text columns.
+          nullable: true
           type: number
         text_structure_similarity_score:
           title: Text Structure Similarity Score
           description: Jensen-Shannon divergence over sentence count, words-per-sentence,
             and characters-per-word distributions between real and synthetic free-text
             columns.
+          nullable: true
           type: number
         autocorrelation_similarity_score:
           title: Autocorrelation Similarity Score
           description: How closely lagged self-correlation in synthetic time-series
             sequences matches the training sequences.
+          nullable: true
+          type: number
+        window_membership_inference_protection_score:
+          title: Window Membership Inference Protection Score
+          description: Resistance to attacks that use short windows of consecutive
+            values to determine whether a time-series sequence was in the training
+            set. Reported on its own; not part of the Data Privacy Score.
+          nullable: true
           type: number
         data_privacy_score:
           title: Data Privacy Score
           description: Composite of MIA and AIA protection scores.
+          nullable: true
           type: number
         membership_inference_protection_score:
           title: Membership Inference Protection Score
           description: Resistance to attacks that try to determine whether a record
             was in the training set.
+          nullable: true
           type: number
         attribute_inference_protection_score:
           title: Attribute Inference Protection Score
           description: Resistance to attacks that try to infer sensitive attributes
             from quasi-identifiers.
+          nullable: true
           type: number
         num_valid_records:
           title: Num Valid Records
           description: Count of synthetic records that passed schema and format validation.
+          nullable: true
           type: integer
         num_invalid_records:
           title: Num Invalid Records
           description: Count of synthetic records filtered out during validation.
+          nullable: true
           type: integer
         num_prompts:
           title: Num Prompts
           description: Total LLM generation prompts issued.
+          nullable: true
           type: integer
         valid_record_fraction:
           title: Valid Record Fraction
           description: 'Ratio of valid records: ``num_valid_records / (num_valid_records
             + num_invalid_records)``.'
+          nullable: true
           type: number
         num_completion_tokens:
           title: Num Completion Tokens
           description: Total tokens generated by the LLM across all completions.
+          nullable: true
           type: integer
         num_valid_record_tokens:
           title: Num Valid Record Tokens
           description: Tokens in records that passed validation.
+          nullable: true
           type: integer
         num_invalid_record_tokens:
           title: Num Invalid Record Tokens
           description: Tokens in records that failed validation.
+          nullable: true
           type: integer
         num_non_record_tokens:
           title: Num Non Record Tokens
           description: Tokens not part of any recognized record.
+          nullable: true
           type: integer
         valid_record_token_fraction:
           title: Valid Record Token Fraction
           description: Fraction of total completion tokens in valid records.
+          nullable: true
           type: number
         tokens_per_prompt:
           title: Tokens Per Prompt
           description: 'Average completion tokens per prompt: num_completion_tokens
             / num_prompts.'
+          nullable: true
           type: number
         tokens_per_second:
           title: Tokens Per Second
           description: Total completion tokens divided by generation wall-clock time.
+          nullable: true
           type: number
         valid_tokens_per_second:
           title: Valid Tokens Per Second
           description: Valid record tokens divided by generation wall-clock time.
+          nullable: true
           type: number
         tokenization_overhead_sec:
           title: Tokenization Overhead Sec
           description: Wall-clock seconds spent on tokenization for statistics tracking.
+          nullable: true
           type: number
         timing:
           allOf:
@@ -2128,51 +3487,71 @@ components:
         total_time_sec:
           title: Total Time Sec
           description: Total end-to-end pipeline duration in seconds.
+          nullable: true
           type: number
         pii_replacer_time_sec:
           title: Pii Replacer Time Sec
           description: Time spent on PII replacement.
+          nullable: true
           type: number
         training_time_sec:
           title: Training Time Sec
           description: Time spent on model training.
+          nullable: true
           type: number
         generation_time_sec:
           title: Generation Time Sec
           description: Time spent generating synthetic records.
+          nullable: true
           type: number
         evaluation_time_sec:
           title: Evaluation Time Sec
           description: Time spent evaluating synthetic data quality.
+          nullable: true
           type: number
       type: object
       title: SafeSynthesizerTiming
       description: Wall-clock durations for each pipeline stage.
-    StepDefinition:
+    Scores:
       properties:
-        vars:
-          title: Vars
-          description: Variable names and templates.
-          additionalProperties:
-            anyOf:
-            - type: string
-            - additionalProperties: true
-              type: object
-            - items: {}
-              type: array
-          type: object
-        columns:
+        synthetic_quality:
           allOf:
-          - $ref: '#/components/schemas/ColumnActions'
-          description: Columns transform configuration.
-        rows:
+          - $ref: '#/components/schemas/MetricScore'
+          description: Synthetic Quality Score.
+          nullable: true
+        data_privacy:
           allOf:
-          - $ref: '#/components/schemas/RowActions'
-          description: Rows transform configurations.
+          - $ref: '#/components/schemas/MetricScore'
+          description: Data Privacy Score.
+          nullable: true
       type: object
-      title: StepDefinition
-      description: Single transformation step with optional variables, column actions,
-        and row actions.
+      required:
+      - synthetic_quality
+      - data_privacy
+      title: Scores
+      description: Overall scores.
+    SkippedComparison:
+      properties:
+        group:
+          title: Group
+          description: Group label, or null for one global sequence.
+          nullable: true
+          type: string
+        column:
+          type: string
+          title: Column
+          description: Column name.
+        reason:
+          type: string
+          title: Reason
+          description: Why the pair was left out.
+      type: object
+      required:
+      - group
+      - column
+      - reason
+      title: SkippedComparison
+      description: A group and column pair left out of the score.
     StringFilter:
       additionalProperties: false
       properties:
@@ -2254,6 +3633,67 @@ components:
         output, which backend enforces the constraint, and how the constraint schema
 
         is built.'
+    TextSemanticMetric:
+      properties:
+        score:
+          allOf:
+          - $ref: '#/components/schemas/MetricScore'
+          description: The metric's score.
+        projections:
+          additionalProperties:
+            $ref: '#/components/schemas/Projection'
+          type: object
+          title: Projections
+          description: Projected embeddings by text column.
+      type: object
+      required:
+      - score
+      - projections
+      title: TextSemanticMetric
+      description: Text semantic similarity, with each text column's embeddings projected
+        onto two principal components.
+    TextStructureDistributions:
+      properties:
+        sentence_count:
+          allOf:
+          - $ref: '#/components/schemas/Distribution'
+          description: Sentences per record.
+          nullable: true
+        words_per_sentence:
+          allOf:
+          - $ref: '#/components/schemas/Distribution'
+          description: Average words per sentence.
+          nullable: true
+        characters_per_word:
+          allOf:
+          - $ref: '#/components/schemas/Distribution'
+          description: Average characters per word.
+          nullable: true
+      type: object
+      required:
+      - sentence_count
+      - words_per_sentence
+      - characters_per_word
+      title: TextStructureDistributions
+      description: Distributions of per-record text statistics in one column.
+    TextStructureMetric:
+      properties:
+        score:
+          allOf:
+          - $ref: '#/components/schemas/MetricScore'
+          description: The metric's score.
+        columns:
+          additionalProperties:
+            $ref: '#/components/schemas/TextStructureDistributions'
+          type: object
+          title: Columns
+          description: Text statistics by text column.
+      type: object
+      required:
+      - score
+      - columns
+      title: TextStructureMetric
+      description: Text structure similarity, with the statistics it compares.
     TimeSeriesEvaluationParameters:
       properties:
         enabled:
@@ -2266,6 +3706,10 @@ components:
           allOf:
           - $ref: '#/components/schemas/AutocorrelationSimilarityParameters'
           description: Autocorrelation similarity metric parameters.
+        window_group_mia:
+          allOf:
+          - $ref: '#/components/schemas/WindowGroupMIAParameters'
+          description: Window membership inference protection metric parameters.
       type: object
       title: TimeSeriesEvaluationParameters
       description: 'Metric-specific time-series evaluation configuration.
@@ -2366,10 +3810,6 @@ components:
             treated as a ratio of total training steps; 0 disables warmup. Must be
             finite and >= 0, and cannot be fractional at or above 1.
           default: 0.05
-        warmup_ratio:
-          title: warmup_ratio
-          description: Deprecated. Use warmup_steps instead.
-          type: number
         lr_scheduler:
           type: string
           title: lr_scheduler
@@ -2447,25 +3887,14 @@ components:
             memory usage and potentially speed up training, but may also impact model
             accuracy.
           default: false
-        quantization_bits:
-          type: integer
-          enum:
-          - 4
-          - 8
-          title: quantization_bits
-          description: "Deprecated: use ``quantization_scheme`` instead. Bit width\
-            \ for bitsandbytes quantization when ``quantization_scheme`` is not set\
-            \ (back-compat alias: 4 \u2192 bnb-4bit, 8 \u2192 bnb-8bit)."
-          default: 8
-          deprecated: true
         quantization_scheme:
           allOf:
           - $ref: '#/components/schemas/QuantizationScheme'
           title: quantization_scheme
           description: Quantization scheme to use when ``quantize_model=True``. Accepts
-            ``bnb-4bit``, ``bnb-8bit``, ``fp8``, ``nvfp4``, or ``mxfp4``. If unset,
-            falls back to ``quantization_bits`` for backward compatibility. Non-bitsandbytes
+            ``bnb-4bit``, ``bnb-8bit``, ``fp8``, ``nvfp4``, or ``mxfp4``. Non-bitsandbytes
             schemes are incompatible with ``peft_implementation='loftq'``.
+          default: bnb-8bit
         peft_implementation:
           type: string
           title: peft_implementation
@@ -2567,3 +3996,290 @@ components:
         These parameters control the validation and automatic fixes when going
 
         from LLM output to tabular data.'
+    WindowAttack:
+      properties:
+        threshold:
+          title: Threshold
+          description: Distance at or below which a window is flagged, or null when
+            it overflows.
+          nullable: true
+          type: number
+        training_flag_rate:
+          type: number
+          title: Training Flag Rate
+          description: Share of training windows flagged.
+        holdout_flag_rate:
+          type: number
+          title: Holdout Flag Rate
+          description: Share of holdout windows flagged.
+        privacy_loss_beyond_chance:
+          type: number
+          title: Privacy Loss Beyond Chance
+          description: Privacy loss after removing the expected chance loss.
+        holdout_exact_match_rate:
+          type: number
+          title: Holdout Exact Match Rate
+          description: Share of holdout windows with an exact synthetic copy.
+        exact_copy_privacy_loss:
+          type: number
+          title: Exact Copy Privacy Loss
+          description: Privacy loss from exact training copies beyond the holdout's.
+      type: object
+      required:
+      - threshold
+      - training_flag_rate
+      - holdout_flag_rate
+      - privacy_loss_beyond_chance
+      - holdout_exact_match_rate
+      - exact_copy_privacy_loss
+      title: WindowAttack
+      description: Membership inference attack results against the holdout.
+    WindowCounts:
+      properties:
+        training_windows_total:
+          type: integer
+          title: Training Windows Total
+          description: Training windows before sampling.
+        training_windows:
+          type: integer
+          title: Training Windows
+          description: Training windows compared.
+        synthetic_windows_total:
+          type: integer
+          title: Synthetic Windows Total
+          description: Synthetic windows before sampling.
+        synthetic_windows:
+          type: integer
+          title: Synthetic Windows
+          description: Synthetic windows compared.
+        holdout_windows_total:
+          type: integer
+          title: Holdout Windows Total
+          description: Holdout windows before sampling.
+        holdout_windows:
+          type: integer
+          title: Holdout Windows
+          description: Holdout windows compared.
+        holdout_groups_with_windows:
+          type: integer
+          title: Holdout Groups With Windows
+          description: Holdout groups with at least one window.
+      type: object
+      required:
+      - training_windows_total
+      - training_windows
+      - synthetic_windows_total
+      - synthetic_windows
+      - holdout_windows_total
+      - holdout_windows
+      - holdout_groups_with_windows
+      title: WindowCounts
+      description: Windows per dataset, before and after sampling.
+    WindowDistances:
+      properties:
+        training:
+          items:
+            nullable: true
+            type: number
+          type: array
+          title: Training
+          description: Distance of each training window, or null where undefined.
+        holdout:
+          title: Holdout
+          description: Distance of each holdout window, null where undefined, or null
+            without the attack.
+          nullable: true
+          items:
+            nullable: true
+            type: number
+          type: array
+      type: object
+      required:
+      - training
+      - holdout
+      title: WindowDistances
+      description: Euclidean distance from each window to its nearest synthetic window,
+        after standardizing each value.
+    WindowEvaluationMode:
+      type: string
+      enum:
+      - full
+      - copy_diagnostics_only
+      - unavailable
+      title: WindowEvaluationMode
+      description: How much of window membership inference ran.
+    WindowGroupMIAParameters:
+      properties:
+        value_columns:
+          title: Value Columns
+          description: Numeric value columns combined into each window. Defaults to
+            all shared columns inferred as numeric, up to max_columns. Changing this
+            selection changes the meaning of the score.
+          items:
+            type: string
+          type: array
+        window_size:
+          type: integer
+          minimum: 2.0
+          title: Window Size
+          description: Number of consecutive observations compared as one window.
+            Training and holdout windows use a stride of half the window_size, and
+            synthetic windows use a stride of 1. Shorter windows detect partial copies
+            in shorter sequences, and longer windows detect copies blurred by noise.
+            Scores computed with different windows are not directly comparable.
+          default: 10
+        max_windows:
+          type: integer
+          minimum: 20.0
+          title: Max Windows
+          description: Maximum training and holdout windows compared, each, using
+            a reproducible sample across groups to bound runtime. Fewer windows make
+            the score noisier but faster to compute. The score needs at least 20 of
+            each.
+          default: 1000
+        max_columns:
+          type: integer
+          minimum: 1.0
+          title: Max Columns
+          description: Maximum automatically selected numeric columns combined into
+            each window, chosen with a reproducible sample to bound runtime. Explicit
+            value_columns are always used in full.
+          default: 12
+      type: object
+      title: WindowGroupMIAParameters
+      description: 'Control window membership inference protection evaluation.
+
+
+        Timestamp ordering and sequence grouping use the top-level time-series and
+
+        data settings. The score needs grouped data and a holdout of at least two
+
+        whole groups, which the pipeline creates when
+
+        ``data.group_training_examples_by`` is set. Without them, only copy
+
+        diagnostics are reported.'
+    WindowGroupSummary:
+      properties:
+        group:
+          title: Group
+          description: Group label, or null for one global sequence.
+          nullable: true
+          type: string
+        windows:
+          type: integer
+          title: Windows
+          description: Windows compared.
+        exact_copy_rate:
+          type: number
+          title: Exact Copy Rate
+          description: Share of windows with an exact synthetic copy.
+        flag_rate:
+          title: Flag Rate
+          description: Share of windows flagged, or null without the attack.
+          nullable: true
+          type: number
+      type: object
+      required:
+      - group
+      - windows
+      - exact_copy_rate
+      - flag_rate
+      title: WindowGroupSummary
+      description: Windows of one training group.
+    WindowMembershipInferenceDetails:
+      properties:
+        evaluation_mode:
+          allOf:
+          - $ref: '#/components/schemas/WindowEvaluationMode'
+          description: '''full'', ''copy_diagnostics_only'' without a usable holdout,
+            or ''unavailable''.'
+        columns:
+          items:
+            type: string
+          type: array
+          title: Columns
+          description: Columns in each window, in the order of window values.
+        excluded_columns:
+          items:
+            type: string
+          type: array
+          title: Excluded Columns
+          description: Numeric training columns left out because the synthetic data
+            lacks them or has non-numeric values.
+        window_size:
+          title: Window Size
+          description: Steps per window, or null.
+          nullable: true
+          type: integer
+        counts:
+          allOf:
+          - $ref: '#/components/schemas/WindowCounts'
+          description: Window counts, or null.
+          nullable: true
+        exact_copy_rate:
+          title: Exact Copy Rate
+          description: Share of training windows with an exact synthetic copy, or
+            null.
+          nullable: true
+          type: number
+        closest_match:
+          allOf:
+          - $ref: '#/components/schemas/ClosestMatch'
+          description: Closest synthetic window, or null.
+          nullable: true
+        distances:
+          allOf:
+          - $ref: '#/components/schemas/WindowDistances'
+          description: Window distances, or null.
+          nullable: true
+        attack:
+          allOf:
+          - $ref: '#/components/schemas/WindowAttack'
+          description: Attack results, or null without a usable holdout.
+          nullable: true
+        training_group_count:
+          type: integer
+          title: Training Group Count
+          description: Training groups with at least one window.
+        per_group:
+          items:
+            $ref: '#/components/schemas/WindowGroupSummary'
+          type: array
+          title: Per Group
+          description: The most-flagged training groups, at most 12, as the report
+            charts them; empty without a holdout, since then no group is flagged and
+            other training group names are left out.
+      type: object
+      required:
+      - evaluation_mode
+      - columns
+      - excluded_columns
+      - window_size
+      - counts
+      - exact_copy_rate
+      - closest_match
+      - distances
+      - attack
+      - training_group_count
+      - per_group
+      title: WindowMembershipInferenceDetails
+      description: Window counts, distances, copies, and attack results; null or empty
+        where the metric stopped before them.
+    WindowMembershipInferenceMetric:
+      properties:
+        score:
+          allOf:
+          - $ref: '#/components/schemas/MetricScore'
+          description: The metric's score.
+        details:
+          allOf:
+          - $ref: '#/components/schemas/WindowMembershipInferenceDetails'
+          description: Window counts, distances, and attack results.
+      type: object
+      required:
+      - score
+      - details
+      title: WindowMembershipInferenceMetric
+      description: Window membership inference protection, with its windows and attack
+        results.

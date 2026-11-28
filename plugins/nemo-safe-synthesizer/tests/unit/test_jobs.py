@@ -11,7 +11,6 @@ import pytest
 from nemo_helix_plugin.client.errors import NotFoundError as ClientNotFoundError
 from nemo_helix_plugin.client.errors import PermissionDeniedError as ClientPermissionDeniedError
 from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError
-from nemo_safe_synthesizer.config.replace_pii import ClassifyConfig, Globals, PiiReplacerConfig, StepDefinition
 from nemo_safe_synthesizer_plugin.job_config import SafeSynthesizerJobConfig as PluginJobConfig
 from nemo_safe_synthesizer_plugin.job_config import SafeSynthesizerParameters
 from nemo_safe_synthesizer_plugin.jobs import generate
@@ -56,34 +55,17 @@ def mock_sdk(mock_files_client):
 
 
 @pytest.fixture(autouse=True)
-def models_client(mock_files_client):
-    models_client = MagicMock()
-    provider_response = MagicMock()
-    provider_response.data.return_value = MagicMock(name="provider")
-    models_client.get_provider = AsyncMock(return_value=provider_response)
-    models_client.get_provider_route_openai_url = MagicMock(
-        return_value="http://nhx-host/apis/inference-gateway/v2/workspaces/default/provider/my-nim/-/v1"
-    )
-
-    with (
-        patch("nemo_safe_synthesizer_plugin.jobs.generate.AsyncModelsClient.from_client", return_value=models_client),
-        patch(
-            "nemo_safe_synthesizer_plugin.jobs.generate.AsyncFilesClient.from_client", return_value=mock_files_client
-        ),
+def files_client_patch(mock_files_client):
+    with patch(
+        "nemo_safe_synthesizer_plugin.jobs.generate.AsyncFilesClient.from_client", return_value=mock_files_client
     ):
-        yield models_client
+        yield
 
 
-def _make_spec(data_source: str = DEFAULT_DATA_SOURCE, model_provider: str | None = None):
-    replace_pii = None
-    if model_provider is not None:
-        replace_pii = PiiReplacerConfig(
-            globals=Globals(classify=ClassifyConfig(classify_model_provider=model_provider)),
-            steps=[StepDefinition()],
-        )
+def _make_spec(data_source: str = DEFAULT_DATA_SOURCE):
     return PluginJobConfig(
         data_source=data_source,
-        config=SafeSynthesizerParameters(replace_pii=replace_pii),
+        config=SafeSynthesizerParameters(replace_pii=None),
     )
 
 
@@ -109,6 +91,16 @@ async def test_job_config_compiler_validates_data_source(mock_sdk, mock_files_cl
 
 
 @pytest.mark.asyncio
+async def test_job_config_compiler_accepts_default_replace_pii_config(mock_sdk):
+    spec = PluginJobConfig.model_validate({"data_source": DEFAULT_DATA_SOURCE, "config": {}})
+
+    result = await _compile(spec, mock_sdk)
+
+    assert spec.config.replace_pii is not None
+    assert len(result["steps"]) == 1
+
+
+@pytest.mark.asyncio
 async def test_job_config_compiler_data_source_not_found(mock_sdk, mock_files_client):
     mock_response = MagicMock()
     mock_response.status_code = 404
@@ -130,17 +122,6 @@ async def test_job_config_compiler_data_source_permission_denied(mock_sdk, mock_
 
     with pytest.raises(PermissionError, match="Access denied to fileset"):
         await _compile(_make_spec(), mock_sdk)
-
-
-@pytest.mark.asyncio
-async def test_job_config_compiler_with_classify_provider(mock_sdk, models_client):
-    result = await _compile(_make_spec(model_provider="default/my-nim"), mock_sdk)
-
-    models_client.get_provider.assert_awaited_once_with(name="my-nim", workspace="default")
-    step = next(iter(result["steps"]))
-    assert step["executor"]["provider"] == "gpu"
-    env = {e["name"]: e.get("value") for e in step.get("environment", [])}
-    assert env["CLASSIFY_LLM_ENDPOINT_PATH"] == "/apis/inference-gateway/v2/workspaces/default/provider/my-nim/-/v1"
 
 
 @pytest.mark.asyncio
@@ -346,12 +327,6 @@ def test_plugin_job_config_pretrained_model_job_alone_no_warning(caplog):
     assert not any(
         "pretrained_model_job" in record.message and "pretrained_model" in record.message for record in caplog.records
     )
-
-
-@pytest.mark.asyncio
-async def test_job_config_compiler_classify_provider_wrong_format(mock_sdk):
-    with pytest.raises(HelixJobCompilationError, match="Expected 'workspace/provider_name'"):
-        await _compile(_make_spec(model_provider="no-slash-here"), mock_sdk)
 
 
 def test_plugin_job_config_enable_flags():

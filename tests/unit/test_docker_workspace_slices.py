@@ -197,7 +197,7 @@ def test_ngc_notebook_is_replaced_before_system_copy_cleanup() -> None:
 
 def test_safe_synthesizer_generation_stack_uses_patched_upstream_release() -> None:
     project = _load_pyproject(ROOT / "plugins/nemo-safe-synthesizer/pyproject.toml")
-    assert "nemo-safe-synthesizer==0.1.17" in project["project"]["dependencies"]
+    assert "nemo-safe-synthesizer>=0.2.0" in project["project"]["dependencies"]
     dockerfile = ROOT / "docker/Dockerfile.nhx-safe-synthesizer-tasks"
     assert "nemo-safe-synthesizer[engine,cu129]==0.1.17" in dockerfile.read_text()
     assert "https://wheels.vllm.ai/0.32.0/cu129" in dockerfile.read_text()

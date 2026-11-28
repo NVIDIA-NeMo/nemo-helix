@@ -6667,10 +6667,10 @@ requires-dist = [
     { name = "nemo-relay", marker = "extra == 'services'", specifier = ">=0.11.0,<0.12" },
     { name = "nemo-relay-cli-bin", marker = "extra == 'nemo-agents-plugin-claude'", specifier = ">=0.11.0,<0.12" },
     { name = "nemo-relay-cli-bin", marker = "extra == 'nemo-agents-plugin-codex'", specifier = ">=0.11.0,<0.12" },
-    { name = "nemo-safe-synthesizer", marker = "extra == 'all'", specifier = "==0.1.17" },
-    { name = "nemo-safe-synthesizer", marker = "extra == 'nemo-safe-synthesizer-plugin'", specifier = "==0.1.17" },
-    { name = "nemo-safe-synthesizer", marker = "extra == 'plugins'", specifier = "==0.1.17" },
-    { name = "nemo-safe-synthesizer", marker = "extra == 'services'", specifier = "==0.1.17" },
+    { name = "nemo-safe-synthesizer", marker = "extra == 'all'", git = "https://github.com/NVIDIA-NeMo/Safe-Synthesizer?rev=6ee1bf7627dbd221e3b9ee503219d873773879de" },
+    { name = "nemo-safe-synthesizer", marker = "extra == 'nemo-safe-synthesizer-plugin'", git = "https://github.com/NVIDIA-NeMo/Safe-Synthesizer?rev=6ee1bf7627dbd221e3b9ee503219d873773879de" },
+    { name = "nemo-safe-synthesizer", marker = "extra == 'plugins'", git = "https://github.com/NVIDIA-NeMo/Safe-Synthesizer?rev=6ee1bf7627dbd221e3b9ee503219d873773879de" },
+    { name = "nemo-safe-synthesizer", marker = "extra == 'services'", git = "https://github.com/NVIDIA-NeMo/Safe-Synthesizer?rev=6ee1bf7627dbd221e3b9ee503219d873773879de" },
     { name = "nemo-sandboxed-gym", marker = "extra == 'harbor'", editable = "packages/sandboxed_gym" },
     { name = "nemo-sandboxed-gym", marker = "extra == 'nhx-evals-sdk'", editable = "packages/sandboxed_gym" },
     { name = "nemo-switchyard", marker = "extra == 'all'", specifier = "==0.3.0" },
@@ -7529,11 +7529,10 @@ dev = [
 
 [[package]]
 name = "nemo-safe-synthesizer"
-version = "0.1.17"
-source = { registry = "https://pypi.org/simple" }
+version = "0.2.0.post6.dev0+6ee1bf7"
+source = { git = "https://github.com/NVIDIA-NeMo/Safe-Synthesizer?rev=6ee1bf7627dbd221e3b9ee503219d873773879de#6ee1bf7627dbd221e3b9ee503219d873773879de" }
 dependencies = [
     { name = "colorama" },
-    { name = "faker" },
     { name = "httpx" },
     { name = "huggingface-hub" },
     { name = "jsonschema" },
@@ -7546,9 +7545,6 @@ dependencies = [
     { name = "structlog" },
     { name = "tqdm" },
     { name = "typing-extensions" },
-]
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/77/4a/7f3488c6cedb00f5cafd1b4c36b6dbe7a9977644547ba2588d9316197065/nemo_safe_synthesizer-0.1.17-py3-none-any.whl", hash = "sha256:853a0c093a3c3ae175285d05c4382b826175bf321f05bded60afc56beeaa2ffe", size = 654045, upload-time = "2026-11-12T23:32:34.984Z" },
 ]
 
 [[package]]
@@ -7611,7 +7607,7 @@ requires-dist = [
     { name = "lark", marker = "extra == 'nemo-helix-plugin'", specifier = ">=1.1.0" },
     { name = "nemo-helix", editable = "packages/nemo_helix" },
     { name = "nemo-helix-plugin", editable = "packages/nemo_helix_plugin" },
-    { name = "nemo-safe-synthesizer", specifier = "==0.1.17" },
+    { name = "nemo-safe-synthesizer", git = "https://github.com/NVIDIA-NeMo/Safe-Synthesizer?rev=6ee1bf7627dbd221e3b9ee503219d873773879de" },
     { name = "openai", marker = "extra == 'nemo-helix-plugin'", specifier = ">=1.109.1" },
     { name = "pydantic", marker = "extra == 'nemo-helix-plugin'", specifier = ">=2.12.0" },
     { name = "pydantic", extras = ["email"], specifier = ">=2.9.2" },

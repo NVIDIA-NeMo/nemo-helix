@@ -96,7 +96,7 @@ For differential privacy configuration and privacy-utility tradeoffs, refer to [
 ## Evaluation Reports
 
 Every NeMo Safe Synthesizer job automatically generates an HTML evaluation report and stores it as the job's `evaluation-report` result.
-A machine-readable `summary` result contains the same scores and timing data as structured JSON. The report contains:
+A machine-readable `summary` result contains the same scores and timing data as structured JSON, and an `evaluation-report-data` result contains everything the report shows as structured JSON. The report contains:
 
 - Overall SQS and DPS scores
 - Statistics describing the training and synthetic data
@@ -109,6 +109,7 @@ Download the report with the Python SDK, from the `SafeSynthesizerJob` returned 
 ```python
 job.save_report("./evaluation_report.html")  # Write the HTML report to a local file
 summary = job.fetch_summary()  # Scores as a SafeSynthesizerSummary
+report_data = job.fetch_report_data()  # Report contents as an EvaluationReportData
 ```
 
 ## Configuration
