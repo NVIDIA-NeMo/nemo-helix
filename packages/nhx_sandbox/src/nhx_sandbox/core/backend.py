@@ -11,6 +11,8 @@ didn't ask for. Backends raise the errors in ``nhx_sandbox.core.errors``, never 
 Some backends are managed services whose operator, not the caller, decides a sandbox's size, lifetime,
 user and network. ``check`` lets a runner find out up front whether a task fits, and ``PlatformEgress``
 lets a task accept network rules it can't set.
+
+``nhx_sandbox.conformance`` turns this contract into tests, and every backend must pass them.
 """
 
 from __future__ import annotations
@@ -40,6 +42,7 @@ __all__ = [
     "WorkloadNeeds",
     "WorkloadUser",
     "capability_refusals",
+    "merged_env",
     "require_absolute_path",
     "require_egress_policy",
     "require_own_ref",
@@ -553,3 +556,12 @@ def capability_refusals(capabilities: Capabilities, spec: SandboxSpec, needs: Wo
             "(PlatformEgress) to run here"
         )
     return reasons
+
+
+def merged_env(*layers: Mapping[str, str] | None) -> dict[str, str]:
+    """Merge environment layers, such as the spec's env and a request's; later layers win."""
+    merged: dict[str, str] = {}
+    for layer in layers:
+        if layer:
+            merged.update(layer)
+    return merged
