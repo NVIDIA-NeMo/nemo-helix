@@ -10,7 +10,10 @@ from nemo_guardrails_plugin.benchmarks.aiperf_runner import (
     SweepRunResult,
     collect_sweep_results,
     prepare_runtime_aiperf_config,
+    validate_concurrencies,
 )
+from nemo_guardrails_plugin.benchmarks.analyze import CONCURRENCIES_TO_VALIDATE
+from nemo_guardrails_plugin.benchmarks.paths import build_run_paths, discover_nhx_repo_root
 
 
 def _write_template(path: Path) -> None:
@@ -64,6 +67,65 @@ class TestPrepareRuntimeAiperfConfig:
                 runtime_config_path=tmp_path / "out.yaml",
                 aiperf_output_dir=tmp_path / "results",
             )
+
+
+class TestConcurrencySelection:
+    def test_runs_only_selected_levels_and_keeps_the_rest_of_the_template(self, tmp_path: Path) -> None:
+        template_path = tmp_path / "template.yaml"
+        _write_template(template_path)
+        runtime_config_path = tmp_path / "out" / "runtime.yaml"
+
+        prepare_runtime_aiperf_config(
+            template_path=template_path,
+            runtime_config_path=runtime_config_path,
+            aiperf_output_dir=tmp_path / "results",
+            concurrencies=(4, 1, 4),
+        )
+
+        written = yaml.safe_load(runtime_config_path.read_text(encoding="utf-8"))
+        template = yaml.safe_load(template_path.read_text(encoding="utf-8"))
+        assert written["sweeps"]["concurrency"] == [1, 4]
+        assert written["base_config"] == template["base_config"]
+        assert written["batch_name"] == template["batch_name"]
+
+    @pytest.mark.parametrize("concurrencies", [(64,), (1, 64), ()])
+    def test_rejects_levels_outside_the_template(self, tmp_path: Path, concurrencies: tuple[int, ...]) -> None:
+        template_path = tmp_path / "template.yaml"
+        _write_template(template_path)
+        runtime_config_path = tmp_path / "out" / "runtime.yaml"
+
+        with pytest.raises(ValueError, match="oncurrency"):
+            prepare_runtime_aiperf_config(
+                template_path=template_path,
+                runtime_config_path=runtime_config_path,
+                aiperf_output_dir=tmp_path / "results",
+                concurrencies=concurrencies,
+            )
+        with pytest.raises(ValueError, match="oncurrency"):
+            validate_concurrencies(template_path, concurrencies)
+        assert not runtime_config_path.exists()
+
+    def test_validate_accepts_a_subset(self, tmp_path: Path) -> None:
+        template_path = tmp_path / "template.yaml"
+        _write_template(template_path)
+
+        validate_concurrencies(template_path, (2, 4))
+
+    def test_rejects_template_without_concurrency_sweep(self, tmp_path: Path) -> None:
+        template_path = tmp_path / "template.yaml"
+        template_path.write_text(yaml.safe_dump({"base_config": {}}), encoding="utf-8")
+
+        with pytest.raises(ValueError, match=r"sweeps\.concurrency"):
+            validate_concurrencies(template_path, (1,))
+
+
+def test_checked_in_sweep_runs_exactly_the_checked_levels() -> None:
+    """Every swept level is checked, and every checked level is swept."""
+    nhx_repo_root = discover_nhx_repo_root()
+    paths = build_run_paths(nhx_repo_root=nhx_repo_root, nemoguardrails_repo_root=nhx_repo_root, run_id="unused")
+    config = yaml.safe_load(paths.config_template.read_text(encoding="utf-8"))
+
+    assert config["sweeps"]["concurrency"] == sorted(CONCURRENCIES_TO_VALIDATE)
 
 
 def _make_sweep_dir(parent: Path, sweep_label: str, *, returncode: int | None, duration: float | None) -> Path:

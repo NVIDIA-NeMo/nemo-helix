@@ -14,6 +14,7 @@ import json
 import logging
 import subprocess
 import sys
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -61,14 +62,19 @@ def prepare_runtime_aiperf_config(
     runtime_config_path: Path,
     aiperf_output_dir: Path,
     model_ref: str | None = None,
+    concurrencies: Sequence[int] | None = None,
 ) -> dict[str, Any]:
     """Materialize the AIPerf config this run will use.
 
     Reads ``template_path``, overrides ``output_base_dir`` (so AIPerf
-    artifacts nest under this run) and optionally ``base_config.model``
-    (so one template can target multiple VirtualModels), and writes the
-    result to ``runtime_config_path``. Returns the parsed config so
-    callers can log sweep params without re-reading the file.
+    artifacts nest under this run), optionally ``base_config.model``
+    (so one template can target multiple VirtualModels) and optionally
+    ``sweeps.concurrency`` (so CI can split the template's levels across
+    jobs), and writes the result to ``runtime_config_path``. Returns the
+    parsed config so callers can log sweep params without re-reading the file.
+
+    ``concurrencies`` must be a subset of the template's ``sweeps.concurrency``
+    list, so a shard can only run levels the template defines.
     """
     if not template_path.is_file():
         raise FileNotFoundError(f"AIPerf template not found: {template_path}")
@@ -85,10 +91,39 @@ def prepare_runtime_aiperf_config(
         if not isinstance(base_config, dict):
             raise ValueError(f"Expected `base_config` mapping in {template_path}, got {type(base_config).__name__}")
         base_config["model"] = model_ref
+    if concurrencies is not None:
+        _select_concurrencies(config, concurrencies, template_path)
     runtime_config_path.parent.mkdir(parents=True, exist_ok=True)
     runtime_config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
 
     return config
+
+
+def validate_concurrencies(template_path: Path, concurrencies: Sequence[int]) -> None:
+    """Raise ``ValueError`` unless ``concurrencies`` is a non-empty subset of the template's sweep.
+
+    Lets the harness reject a bad ``--concurrency`` before it starts any services.
+    """
+    config = yaml.safe_load(template_path.read_text(encoding="utf-8"))
+    if not isinstance(config, dict):
+        raise ValueError(f"Expected a YAML mapping at {template_path}, got {type(config).__name__}")
+    _select_concurrencies(config, concurrencies, template_path)
+
+
+def _select_concurrencies(config: dict[str, Any], concurrencies: Sequence[int], template_path: Path) -> None:
+    """Replace ``sweeps.concurrency`` with ``concurrencies``, which must be a non-empty subset of it."""
+    sweeps = config.get("sweeps")
+    template_levels = sweeps.get("concurrency") if isinstance(sweeps, dict) else None
+    if not isinstance(sweeps, dict) or not isinstance(template_levels, list):
+        raise ValueError(f"Expected a `sweeps.concurrency` list in {template_path}")
+    if not concurrencies:
+        raise ValueError("At least one concurrency level is required")
+    unknown = sorted(set(concurrencies) - set(template_levels))
+    if unknown:
+        raise ValueError(
+            f"Concurrency levels {unknown} are not in {template_path} (sweeps.concurrency: {template_levels})"
+        )
+    sweeps["concurrency"] = sorted(set(concurrencies))
 
 
 def run_aiperf_sweep(

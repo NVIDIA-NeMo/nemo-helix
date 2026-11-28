@@ -1872,10 +1872,12 @@ jobs:
           _TYPER_FORCE_DISABLE_TERMINAL: "1"
 
   guardrails-benchmark:
-    # Parallel matrix jobs (one NHX per variant) so the two sweeps don't
-    # share mocks or contend on :8080. `guardrails-benchmark-analyze` merges
-    # the artifacts and prints the comparison.
-    name: nemo-guardrails plugin benchmark (${{ matrix.variant }})
+    # Parallel matrix jobs (one NHX each) so sweeps don't share mocks or
+    # contend on :8080. Each shard runs one variant at two concurrency levels;
+    # both variants run the same level groups so every with/without pair stays
+    # comparable. `guardrails-benchmark-analyze` merges the artifacts, prints
+    # the comparison and fails if any checked level is missing.
+    name: nemo-guardrails plugin benchmark (${{ matrix.variant }}, c=${{ matrix.levels.concurrency }})
     needs: [changes]
     if: >
       !cancelled() && (
@@ -1890,6 +1892,12 @@ jobs:
       fail-fast: false
       matrix:
         variant: [with-guardrails, without-guardrails]
+        # Must cover `CONCURRENCIES_TO_VALIDATE` in analyze.py; the analyzer
+        # fails on any level missing from either variant.
+        levels:
+          - { name: c1-2, concurrency: "1,2" }
+          - { name: c4-8, concurrency: "4,8" }
+          - { name: c16-32, concurrency: "16,32" }
     steps:
       - name: Checkout nemo-helix
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -1917,12 +1925,13 @@ jobs:
           PYTORCH_DEPS: cpu
       - name: Run benchmark sweep
         working-directory: nemo-helix
-        # Pin both variants to the same `--run-id` so when the analyze job
-        # downloads both artifacts into one `runs/` parent, they merge into
+        # Pin every shard to the same `--run-id` so when the analyze job
+        # downloads all artifacts into one `runs/` parent, they merge into
         # a single run directory the analyzer can read normally.
         run: |
           make benchmark-guardrails BENCHMARK_ARGS="\
             --variant ${{ matrix.variant }} \
+            --concurrency ${{ matrix.levels.concurrency }} \
             --run-id ci-${{ github.run_id }}-${{ github.run_attempt }}"
         env:
           NEMO_GUARDRAILS_REPO_ROOT: ${{ github.workspace }}/NeMo-Guardrails
@@ -1931,14 +1940,14 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          # Ensure we use a unique artifact name per benchmark variant.
-          name: guardrails-benchmark-results-${{ matrix.variant }}
+          # Unique per shard; the analyze job downloads them by this prefix.
+          name: guardrails-benchmark-shard-${{ matrix.variant }}-${{ matrix.levels.name }}
           retention-days: 30
           path: |
             nemo-helix/plugins/nemo-guardrails/benchmarks/artifacts/runs/
 
   guardrails-benchmark-analyze:
-    # Merge both variant artifacts and print the comparison table.
+    # Merge every shard's artifact and print the comparison table.
     name: nemo-guardrails plugin benchmark analysis
     needs: [changes, guardrails-benchmark]
     if: >
@@ -1955,19 +1964,15 @@ jobs:
         with:
           path: nemo-helix
           persist-credentials: false
-      - name: Download with-guardrails artifact
-        # If a variant failed entirely it may have uploaded no artifact;
-        # the analyzer handles the single-variant case so don't fail here.
+      - name: Download benchmark shard artifacts
+        # A failed shard may have uploaded no artifact. Don't fail here: the
+        # analyzer's `--strict` check fails on, and names, every checked
+        # level missing from either variant.
         continue-on-error: true
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: guardrails-benchmark-results-with-guardrails
-          path: nemo-helix/plugins/nemo-guardrails/benchmarks/artifacts/runs/
-      - name: Download without-guardrails artifact
-        continue-on-error: true
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: guardrails-benchmark-results-without-guardrails
+          pattern: guardrails-benchmark-shard-*
+          merge-multiple: true
           path: nemo-helix/plugins/nemo-guardrails/benchmarks/artifacts/runs/
       - name: Print benchmark comparison
         working-directory: nemo-helix
