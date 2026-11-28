@@ -31,6 +31,7 @@ from nemo_evals.image_builds.builder import (
     copy_builder_name,
     ensure_build,
     job_gone,
+    published_platform,
 )
 from nemo_evals.image_builds.models import (
     TERMINAL_BUILD_STATUSES,
@@ -257,9 +258,7 @@ async def _submit_copy(builder: ImageBuilder, image: BuildImage) -> ContainerIma
     reference = str(normalize_reference(image.image))
     if image.platform is None:
         # An image published for one platform can only be copied for that one.
-        published = [p for p in await builder.image_platforms(reference) if p.startswith("linux/")]
-        if len(published) == 1:
-            image.platform = published[0]
+        image.platform = await published_platform(builder, reference)
     submitted = await ensure_build(
         builder,
         name=copy_builder_name(reference, image.platform),

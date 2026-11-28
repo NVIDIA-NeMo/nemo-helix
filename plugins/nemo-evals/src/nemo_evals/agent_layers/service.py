@@ -156,6 +156,7 @@ class AgentLayerService:
             attempt=attempt,
             job=layer_job_name(task, task_revision.content_hash, key, attempt),
             environment_digest=environment_digest,
+            platform=environment.platform,
             image_user=image_user,
             expires_at=now + ttl,
             built_after=now - ttl,

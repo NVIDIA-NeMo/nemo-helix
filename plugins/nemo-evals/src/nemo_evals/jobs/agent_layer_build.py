@@ -4,8 +4,8 @@
 """The agent-layer Job: builds one agent's layer of one task revision through NeMo Builder.
 
 Two steps share the Job's storage. ``fetch-installer`` runs the ``nhx-agent-installer`` image and copies its
-installer archive there, so the cluster's pull credentials, not an anonymous download, fetch it. ``build-layer`` runs
-in ``nhx-tasks`` and does the rest (:func:`~nemo_evals.agent_layers.runner.run_agent_layer_build`).
+installers, one archive per platform, there, so the cluster's pull credentials, not an anonymous download, fetch them.
+``build-layer`` runs in ``nhx-tasks`` and does the rest (:func:`~nemo_evals.agent_layers.runner.run_agent_layer_build`).
 """
 
 from __future__ import annotations
@@ -39,8 +39,8 @@ from nemo_helix_plugin.jobs.types import CreateHelixJobRequest
 
 AGENT_LAYER_BUILD_MODULE = "nemo_evals.tasks.agent_layer_build"
 INSTALLER_IMAGE = "nhx-agent-installer"
-INSTALLER_ARCHIVE = "nhx-agent-installer.tar.gz"
-"""The installer archive's name, at the image's root and on the Job's storage."""
+INSTALLERS_DIR = "nhx-agent-installers"
+"""The directory of installer archives, ``<os>-<arch>.tar.gz``, at the image's root and on the Job's storage."""
 
 AGENT_LAYER_BUILD_RESOURCES = ResourcesSpec(
     requests=ResourcesRequestsSpec(cpu="100m", memory="256Mi"),
@@ -72,7 +72,7 @@ class AgentLayerBuildJob(NemoJob):
                 entities=EntityClient(AsyncEntitiesClient.from_client(async_client)),
                 files=AsyncFilesClient.from_client(async_client),
                 builder=HttpImageBuilder(async_client, workspace=spec.workspace),
-                installer=storage / INSTALLER_ARCHIVE,
+                installers=storage / INSTALLERS_DIR,
             )
         )
         return {"status": "completed" if layer.status == "ready" else "failed", "layer_status": layer.status}
@@ -90,7 +90,7 @@ def agent_layer_build_job_request(
             container=ContainerSpec(
                 image=installer_image(),
                 entrypoint=["/bin/cp"],
-                command=[f"/{INSTALLER_ARCHIVE}", f"{DEFAULT_JOB_STORAGE_PATH}/{INSTALLER_ARCHIVE}"],
+                command=["-r", f"/{INSTALLERS_DIR}", f"{DEFAULT_JOB_STORAGE_PATH}/"],
             ),
             resources=AGENT_LAYER_BUILD_RESOURCES,
         ),

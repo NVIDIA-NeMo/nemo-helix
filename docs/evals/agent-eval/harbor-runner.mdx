@@ -989,6 +989,8 @@ A Kubernetes run reuses installs the same way, through Builder:
 
 A task whose `[environment]` network is `no-network` or an allowlist gets no layer, and its trials install the agent during setup. A layer's install runs in a Builder build, which can reach more of the network than that task's setup can.
 
+A layer is built for its task image's platform. A prebuilt image published for one platform only gets a layer for that platform: an amd64-only image on Apple-silicon nodes gets an amd64 layer, which runs under emulation as the image's trials do.
+
 A layer expires after the `timeout_seconds` of the run that started it. A later run then builds a new one, from a Builder build no older than its own `timeout_seconds`.
 
 To turn Kubernetes layers off, set `evals.runs.harbor.agent_layers: false`.

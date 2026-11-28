@@ -8,9 +8,10 @@ labels: [NeMo]
 ## NeMo Helix Agent Installer Container
 
 This container holds the installer a NeMo Helix evaluation run uses to build an agent layer: a task's
-environment image with the run's agent already installed. It is an archive of a standalone CPython and a
-relocatable virtual environment with Harbor, NeMo Fabric's Harbor agent and the NeMo Helix agent installer,
-which each layer build mounts and runs inside the task's image.
+environment image with the run's agent already installed. It holds an archive per platform, `linux/amd64` and
+`linux/arm64`, of a standalone CPython and a relocatable virtual environment with Harbor, NeMo Fabric's Harbor agent
+and the NeMo Helix agent installer. Each layer build mounts the one for its task image's platform and runs it inside
+that image.
 
 ### Resources
 

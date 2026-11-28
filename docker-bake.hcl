@@ -1094,16 +1094,15 @@ target "nhx-kaniko-smoke-test" {
   platforms  = get_platforms()
 }
 
-# The self-contained agent installer an agent layer's build mounts (nemo-evals agent layers).
+# The self-contained agent installer an agent layer's build mounts (nemo-evals agent layers). No nhx-python-base
+# context: a target's platforms follow `*.platform` overrides, and every variant must build an installer per platform.
 target "nhx-agent-installer-docker" {
   target     = "runtime"
   context    = "."
   dockerfile = "docker/Dockerfile.nhx-agent-installer"
-  contexts = {
-    nhx-python-base = "target:nhx-python-base"
-  }
   args = {
     NHX_COLLECT_SOURCES = NHX_COLLECT_SOURCES
+    NHX_PYTHON_IMAGE    = NHX_PYTHON_IMAGE
   }
   cache-to   = maybe_registry_cache_to("nhx-agent-installer")
   cache-from = maybe_registry_cache_from("nhx-agent-installer")
@@ -1116,11 +1115,9 @@ target "nhx-agent-installer-smoke-test" {
   target     = "smoke-test"
   context    = "."
   dockerfile = "docker/Dockerfile.nhx-agent-installer"
-  contexts = {
-    nhx-python-base = "target:nhx-python-base"
-  }
   args = {
     NHX_COLLECT_SOURCES = NHX_COLLECT_SOURCES
+    NHX_PYTHON_IMAGE    = NHX_PYTHON_IMAGE
   }
   cache-from = maybe_registry_cache_from("nhx-agent-installer")
   output     = ["type=cacheonly"]

@@ -64,6 +64,12 @@ class ImageBuilder(Protocol):
         ...
 
 
+async def published_platform(builder: ImageBuilder, image: str) -> str | None:
+    """The Linux platform ``image`` is published for when it is published for just one, else None."""
+    published = [p for p in await builder.image_platforms(image) if p.startswith("linux/")]
+    return published[0] if len(published) == 1 else None
+
+
 def builder_name(*, context_digest: str, dockerfile: str, platform: str | None = None) -> str:
     """Builder build-set name for an image built from a context holding ``context_digest``'s files, for one platform.
 
