@@ -5,7 +5,7 @@
 
 Translates the :class:`~nemo_agents_plugin.runner.backend.RunnerBackend` interface into
 nemo-deployments ``Deployment`` / ``DeploymentConfig`` entity operations. The deployments
-controller reconciles those entities onto a configured executor (docker, k8s, or openshell).
+controller reconciles those entities onto a configured executor (docker, k8s, openshell, or opensandbox).
 
 Long-running only (``restart_policy=Always``). Finite / run-to-completion belongs to
 AgentRun (Razvan RFCs), not AgentDeployment.
@@ -52,6 +52,7 @@ from nemo_agents_plugin.telemetry.intake_export import (
 from nemo_agents_plugin.utils import get_base_url, get_internal_base_url
 from nemo_deployments_plugin.backends.base import LogResult
 from nemo_deployments_plugin.backends.docker.config import DockerExecutorConfig
+from nemo_deployments_plugin.backends.opensandbox.config import OpenSandboxExecutorConfig
 from nemo_deployments_plugin.backends.openshell.config import OpenShellExecutorConfig
 from nemo_deployments_plugin.backends.registry import ExecutorRegistry, ExecutorSpec
 from nemo_deployments_plugin.config import DeploymentsConfig, ExecutorConfigEntry
@@ -163,8 +164,8 @@ def resolve_agent_gateway_url(
     """Return the platform base URL an agent should call, reachable from its container.
 
     An explicit *override* wins for any mode. Otherwise ``k8s`` uses
-    *internal_base_url* (the in-cluster API Service DNS), ``openshell`` uses
-    *platform_egress_url* (the executor's ``platform_egress`` host and port), and
+    *internal_base_url* (the in-cluster API Service DNS), ``openshell`` and ``opensandbox``
+    use *platform_egress_url* (the executor's ``platform_egress`` host and port), and
     ``docker`` rewrites a loopback *base_url* to ``host.docker.internal``, passing
     other hosts through.
 
@@ -173,7 +174,7 @@ def resolve_agent_gateway_url(
 
     Raises:
         UnreachableGatewayURLError: k8s mode with no *internal_base_url*, or
-            openshell mode with no *platform_egress_url*, and no *override*.
+            openshell or opensandbox mode with no *platform_egress_url*, and no *override*.
         ValueError: *mode* is not a container deployment mode.
     """
     if mode not in CONTAINER_DEPLOYMENT_MODES:
@@ -195,13 +196,13 @@ def resolve_agent_gateway_url(
             "or deployments.gateway_url_override."
         )
 
-    if mode == "openshell":
+    if mode in ("openshell", "opensandbox"):
         if platform_egress_url:
             return platform_egress_url.rstrip("/")
         raise UnreachableGatewayURLError(
-            "No sandbox-reachable inference base URL for openshell deployment: the openshell "
+            f"No sandbox-reachable inference base URL for {mode} deployment: the {mode} "
             "executor has no platform_egress, so the sandbox has no direct route to the platform. "
-            "Set a platform_egress block on the openshell executor (deployments.executors[].config), "
+            f"Set a platform_egress block on the {mode} executor (deployments.executors[].config), "
             "or set deployments.gateway_url_override."
         )
 
@@ -314,8 +315,8 @@ class ImageEntrypointUnsupportedError(ValueError):
 def image_entrypoint_unsupported_message(mode: str) -> str:
     """Return the user-facing error for ``use_image_entrypoint`` on *mode*."""
     return (
-        f"use_image_entrypoint is not supported for deployment_mode {mode!r}: the OpenShell sandbox "
-        "supervisor does not run the image ENTRYPOINT/CMD, so the platform must inject the serve "
+        f"use_image_entrypoint is not supported for deployment_mode {mode!r}: the sandbox does not "
+        "run the image ENTRYPOINT/CMD, so the platform must inject the serve "
         "command. Deploy without use_image_entrypoint, or use deployment_mode 'docker' or 'k8s'."
     )
 
@@ -391,6 +392,8 @@ def executor_for_mode(config: DeploymentsRunnerConfig, mode: DeploymentMode) -> 
         return config.k8s_executor or config.default_executor
     if mode == "openshell":
         return config.openshell_executor or config.default_executor
+    if mode == "opensandbox":
+        return config.opensandbox_executor or config.default_executor
     return config.default_executor
 
 
@@ -429,6 +432,23 @@ def openshell_platform_egress_url(executor: str | None) -> str | None:
     if egress is None:
         return None
     return f"http://{egress.host}:{egress.port}"
+
+
+def opensandbox_platform_egress_url(executor: str | None) -> str | None:
+    """Return the platform URL a sandbox on opensandbox *executor* reaches, or None."""
+    entry = _executor_entry(_resolve_executor_name(executor))
+    if entry is None or entry.backend != "opensandbox":
+        return None
+    egress = OpenSandboxExecutorConfig.model_validate(entry.config).platform_egress
+    return egress.url() if egress is not None else None
+
+
+def _platform_egress_url(executor: str | None, mode: DeploymentMode) -> str | None:
+    if mode == "openshell":
+        return openshell_platform_egress_url(executor)
+    if mode == "opensandbox":
+        return opensandbox_platform_egress_url(executor)
+    return None
 
 
 def require_executor_matches_mode(executor: str | None, mode: DeploymentMode) -> None:
@@ -805,9 +825,7 @@ class DeploymentsRunnerBackend(RunnerBackend):
                 mode=deployment_mode,
                 override=self._config.gateway_url_override,
                 internal_base_url=internal_base_url,
-                platform_egress_url=(
-                    openshell_platform_egress_url(executor) if deployment_mode == "openshell" else None
-                ),
+                platform_egress_url=_platform_egress_url(executor, deployment_mode),
             )
         except UnreachableGatewayURLError as exc:
             logger.error("Refusing to deploy agent %r: %s", name, exc)

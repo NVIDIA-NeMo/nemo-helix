@@ -35,7 +35,7 @@ JsonObject: TypeAlias = JsonMap
 StringMap: TypeAlias = dict[str, str]
 
 DeploymentStatus: TypeAlias = Literal["pending", "starting", "running", "failed", "deleting"]
-DeploymentMode: TypeAlias = Literal["subprocess", "docker", "k8s", "openshell"]
+DeploymentMode: TypeAlias = Literal["subprocess", "docker", "k8s", "openshell", "opensandbox"]
 EndpointProtocol: TypeAlias = Literal["http", "https", "grpc", "tcp"]
 SessionLifecycleStatus: TypeAlias = Literal["active", "expired", "lost", "closed"]
 AgentJobCollection: TypeAlias = Literal[
@@ -402,7 +402,7 @@ class AgentDeployment(EntityMetadata):
     deployment_mode: DeploymentMode = Field(default="subprocess", description="Runtime backend.")
     endpoint: str = Field(default="", description="Subprocess loopback endpoint.")
     endpoints: list[Endpoint] = Field(default_factory=list, description="Routable endpoints for container modes.")
-    image: str = Field(default="", description="Container image for docker/k8s/openshell modes.")
+    image: str = Field(default="", description="Container image for docker/k8s/openshell/opensandbox modes.")
     use_image_entrypoint: bool = Field(
         default=False,
         description="Container modes only: preserve the image ENTRYPOINT/CMD.",
@@ -564,12 +564,12 @@ class CreateDeploymentRequest(BaseModel):
     )
     deployment_mode: DeploymentMode = Field(
         default="subprocess",
-        description="Runtime backend: subprocess (default), docker, k8s, or openshell.",
+        description="Runtime backend: subprocess (default), docker, k8s, openshell, or opensandbox.",
     )
     image: str = Field(
         default="",
         description=(
-            "Container image for docker/k8s/openshell modes. When omitted, uses the agent's "
+            "Container image for docker/k8s/openshell/opensandbox modes. When omitted, uses the agent's "
             "reference.container_image, then deployments.default_image. Ignored for subprocess."
         ),
     )

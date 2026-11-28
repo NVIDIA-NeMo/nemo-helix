@@ -3,8 +3,11 @@
 
 from __future__ import annotations
 
+import subprocess
+import sys
 from collections.abc import Generator
 from contextlib import contextmanager
+from textwrap import dedent
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -207,6 +210,29 @@ def test_registry_skips_backend_with_missing_dependency(
     assert registry.registered_names() == ["ok"]
     with pytest.raises(ExecutorNotFoundError):
         registry.resolve("sandbox-local")
+
+
+def test_registry_imports_and_reports_unavailable_opensandbox_without_sdk() -> None:
+    # Use a fresh interpreter so imports already performed by pytest cannot hide the missing dependency.
+    script = dedent(r"""
+        import sys
+
+        sys.modules["opensandbox"] = None
+
+        import pytest
+        from nemo_deployments_plugin.backends.registry import ExecutorNotFoundError, ExecutorRegistry, ExecutorSpec
+        from nemo_helix_plugin.client.client import AsyncNemoClient
+
+        client = AsyncNemoClient(base_url="http://localhost:8080")
+        registry = ExecutorRegistry.from_config(
+            client,
+            [ExecutorSpec(name="sandbox-local", backend="opensandbox", config={})],
+        )
+        with pytest.raises(ExecutorNotFoundError, match=r"opensandbox>=1\.2\.0"):
+            registry.resolve("sandbox-local")
+        """)
+    result = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, timeout=30)
+    assert result.returncode == 0, result.stderr
 
 
 def test_registry_missing_dependency_default_executor_fails(

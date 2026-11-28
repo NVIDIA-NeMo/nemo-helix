@@ -19,6 +19,7 @@ version = "0.0.0"
 [project.optional-dependencies]
 docker = ["docker>=7.0"]
 k8s = ["kubernetes>=30.1.0"]
+opensandbox = ["opensandbox>=1.2.0"]
 openshell = ["grpcio>=1.78.0", "openshell>=0.1.6", "protobuf>=6.31.1"]
 
 [project.entry-points."nemo.services"]
@@ -53,8 +54,8 @@ dev = [
   "fastapi>=0.115",
   "docker>=7.0",
   "kubernetes>=30.1.0",
-  # openshell/grpcio/protobuf come from the `[openshell]` extra, which the root
-  # `enabled-plugins` group installs in the default workspace sync.
+  # openshell/grpcio/protobuf and opensandbox come from the `[openshell]` and `[opensandbox]`
+  # extras, which the root `enabled-plugins` group installs in the default workspace sync.
 ]
 
 [tool.pytest.ini_options]

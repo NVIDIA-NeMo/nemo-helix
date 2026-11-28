@@ -47,8 +47,14 @@ def endpoint_transport(executor: str | None) -> EndpointTransport:
     config = DeploymentsConfig.get()
     name = executor or config.default_executor
     entry = next((e for e in config.executors if e.name == name), None)
-    if entry is None or entry.backend != "openshell":
+    if entry is None:
         return DIRECT
-    from nemo_deployments_plugin.backends.openshell.config import OpenShellExecutorConfig
+    if entry.backend == "openshell":
+        from nemo_deployments_plugin.backends.openshell.config import OpenShellExecutorConfig
 
-    return OpenShellExecutorConfig.model_validate(entry.config).service_transport()
+        return OpenShellExecutorConfig.model_validate(entry.config).service_transport()
+    if entry.backend == "opensandbox":
+        from nemo_deployments_plugin.backends.opensandbox.config import OpenSandboxExecutorConfig
+
+        return OpenSandboxExecutorConfig.model_validate(entry.config).service_transport()
+    return DIRECT

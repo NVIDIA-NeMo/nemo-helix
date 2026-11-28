@@ -12,6 +12,7 @@ from typing import Any, Self
 from nemo_deployments_plugin.backends.base import DeploymentBackend, MissingBackendDependencyError
 from nemo_deployments_plugin.backends.docker.backend import DockerDeploymentBackend
 from nemo_deployments_plugin.backends.k8s.backend import K8sDeploymentBackend
+from nemo_deployments_plugin.backends.opensandbox.backend import OpenSandboxDeploymentBackend
 from nemo_deployments_plugin.backends.openshell.backend import OpenShellDeploymentBackend
 from nemo_helix_plugin.client.client import AsyncNemoClient
 
@@ -21,6 +22,7 @@ BACKEND_CLASSES: dict[str, type[DeploymentBackend]] = {
     "docker": DockerDeploymentBackend,
     "k8s": K8sDeploymentBackend,
     "openshell": OpenShellDeploymentBackend,
+    "opensandbox": OpenSandboxDeploymentBackend,
 }
 
 
